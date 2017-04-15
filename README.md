@@ -51,7 +51,7 @@ to start.  You don't need to change any other config in the kernel.json.  Be
 very careful to make sure all the commands, double quotes, etc. are present
 (this needs to be a valid JSON formatted file).
 
-At this point you should have the following file: <Jupyter kernel spec location>/micropython/kernel.json
+At this point you should have the following file: (Jupyter kernel spec location above)/micropython/kernel.json
 
 Now run Jupyter notebooks:
 
