@@ -11,7 +11,7 @@ sure to use the same version of python as Jupyter is installed with):
 
     python3 setup.py install
 
-On Mac OSX and some Linux flavors you might need to run as root with sudo flavor
+On Mac OSX and some Linux flavors you might need to run as root with sudo for
 the above command.  Make sure the installation completes successfully and that
 you do not see any error messages.
 
