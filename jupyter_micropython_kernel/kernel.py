@@ -1,5 +1,9 @@
 import logging
 
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging
+#logger = logging.getLogger(__name__)
+
 from ipykernel.kernelbase import Kernel
 import pkg_resources
 
@@ -7,7 +11,6 @@ from jupyter_micropython_kernel.pyboard import Pyboard
 
 
 # Create global logger for debug messages.
-logger = logging.getLogger(__name__)
 # Get version from setuptools.  This is used to tell Jupyter the version of
 # this kernel.
 version = pkg_resources.require('jupyter_micropython_kernel')[0].version
