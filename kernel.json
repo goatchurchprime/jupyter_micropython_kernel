@@ -1,8 +1,0 @@
-{
- "argv": ["python3",
-          "-m", "jupyter_micropython_kernel",
-          "/dev/tty.SLAB_USBtoUART", "115200",
-          "-f", "{connection_file}"],
- "display_name": "MicroPython - /dev/tty.SLAB_USBtoUART",
- "language": "micropython"
-}
