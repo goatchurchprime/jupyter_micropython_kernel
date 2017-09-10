@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 version = pkg_resources.require('jupyter_micropython_kernel')[0].version
 
 
+
 def make_micropython_kernel(port, baud):
     # Create a MicroPython kernel class and return it.  This is done so instance
     # specific config like port and baud rate can be set.  Unfortunately the
@@ -37,14 +38,18 @@ def make_micropython_kernel(port, baud):
             super().__init__(**kwargs)
             # Open MicroPython board and enter raw REPL which resets the board
             # and makes it ready to accept commands.
-            logger.debug('Opening MicroPython board connection on port: {} baud: {}'.format(port, baud))
+            logger.debug('Opening33 MicroPython board connection on port: {} baud: {}'.format(port, baud))
             self._board = Pyboard(port, baudrate=baud)
             self._board.enter_raw_repl()
 
         def do_execute(self, code, silent, store_history=True,
                        user_expressions=None, allow_stdin=False):
+                           
+            logger.debug("Received executing ccccode", [code])
+                           
             # Run the specified code on the connected MicroPython board.
             result, error = self._board.exec_raw(code)
+            
             logger.debug('Result: {} Error: {}'.format(result, error))
             # If there was an error send it back, otherwise send the result.
             # Make sure to convert this to a JSON serializable string from the
@@ -54,6 +59,7 @@ def make_micropython_kernel(port, baud):
             # with name stderr? is there more to return?).
             failed = error is not None and len(error) > 0
             response = result.decode('utf-8') if not failed else error.decode('utf-8')
+            
             # Send the result when not in silent mode.
             if not silent:
                 stream_content = {'name': 'stdout', 'text': response }

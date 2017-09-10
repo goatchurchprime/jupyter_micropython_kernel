@@ -2,6 +2,10 @@
 #   https://github.com/micropython/micropython/blob/master/tools/pyboard.py
 #!/usr/bin/env python
 
+import logging
+logger = logging.getLogger(__name__)
+
+
 """
 pyboard interface
 
@@ -150,24 +154,34 @@ class Pyboard:
         self.serial.close()
 
     def read_until(self, min_num_bytes, ending, timeout=10, data_consumer=None):
-        data = self.serial.read(min_num_bytes)
+        try:
+            data = self.serial.read(min_num_bytes)
+        except KeyboardInterrupt as e:
+            logger.debug("KKeyboard interrupt caught, sending to Micropython")
+            self.serial.write(b'\x03')
+            data = b"KKK"
+            
         if data_consumer:
             data_consumer(data)
         timeout_count = 0
         while True:
-            if data.endswith(ending):
-                break
-            elif self.serial.inWaiting() > 0:
-                new_data = self.serial.read(1)
-                data = data + new_data
-                if data_consumer:
-                    data_consumer(new_data)
-                timeout_count = 0
-            else:
-                timeout_count += 1
-                if timeout is not None and timeout_count >= 100 * timeout:
+            try:
+                if data.endswith(ending):
                     break
-                time.sleep(0.01)
+                elif self.serial.inWaiting() > 0:
+                    new_data = self.serial.read(1)
+                    data = data + new_data
+                    if data_consumer:
+                        data_consumer(new_data)
+                    timeout_count = 0
+                else:
+                    timeout_count += 1
+                    if timeout is not None and timeout_count >= 100 * timeout:
+                        break
+                    time.sleep(0.01)
+            except KeyboardInterrupt as e:
+                logger.debug("Keyboard interrupt caught, sending to Micropython")
+                self.serial.write(b'\x03')
         return data
 
     def enter_raw_repl(self):
