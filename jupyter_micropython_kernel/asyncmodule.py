@@ -21,6 +21,11 @@ ser = None
 replstate = "unknown"     # rawrequested, rawmode
 commandstate = "unknown"  # ready, streamingto, awaitingresult, returningresult
 
+def swrite(msg, prompt):
+    stdout.write(msg)
+    stdout.write(prompt)
+    stdout.flush()
+
 # print(_) to get last variable result
 async def transferline():
     global replstate, commandstate, ser
@@ -30,30 +35,30 @@ async def transferline():
         if line[:6] == "%%CONN":
             bline = line[6:].strip() or "/dev/ttyUSB0 115200"
             bline = bline.split()
-            logger.info(str(bline))
+            strerror = None
+            swrite("Connecting to Serial({}, {})\n".format(bline[0], bline[1]), EXT_PROMPT_OUTPUT)
+            ser = None  # should close original connection
             try:
                 ser = serial.Serial(bline[0], int(bline[1]))
-            except serial.SerialException:
-                logger.info("NNNope")
-                ser = None
-            except Exception as e:
-                print("what", type(e), e)
-            if ser is not None:
-                print(ser)
-                ser.write(b'\r\x03\x03') # ctrl-C twice: interrupt any running program
-                while ser.inWaiting() != 0:
-                    ser.read(1)
-                ser.write(b'\r\x01') # ctrl-A: enter raw REPL
-                replstate = "rawrequested"
-                logger.info("%%{}".format(replstate))
-                stdout.write("\n")
-                stdout.write(EXT_PROMPT_CONTINUATION)
-                stdout.flush()
-                sermessages.put_nowait("conn")
+            except serial.SerialException as e:
+                strerror = e.strerror
+            if strerror:
+                swrite(strerror, EXT_PROMPT)
                 continue
-            else:
-                stdout.write("   serial connection failed\n")
-                line = "fff"
+
+            # this cycle could be done via the sermessages queue
+            swrite(str(ser), EXT_PROMPT_OUTPUT)
+            ser.write(b'\r\x03\x03') # ctrl-C twice: interrupt any running program
+            while ser.inWaiting() != 0:
+                ser.read(1)
+            ser.write(b'\r\x01') # ctrl-A: enter raw REPL
+            replstate = "rawrequested"
+            logger.info("%%{}".format(replstate))
+            stdout.write("\n")
+            stdout.write(EXT_PROMPT_CONTINUATION)
+            stdout.flush()
+            sermessages.put_nowait("conn")
+            continue
 
         if line.strip() == "%%S":
             stdout.write(str([replstate, "serinwaiting", ser, (ser and ser.inWaiting()), recbuffer]))
@@ -91,6 +96,7 @@ async def transferline():
             elif line[0] == "D":  # end of series
                 commandstate = "awaitingresult"
                 await eloop.run_in_executor(None, ser.write, b"\x04\r")
+                    # the response is then "OK[someoutput]\x04[erroroutput]\x04>"
                 
             elif line[0] == "F":  # should always be empty
                 print("fetching")
@@ -154,6 +160,8 @@ async def serreadchar():
                 stdout.flush()
                 
         if commandstate == "returningresult" and len(recbuffer) and recbuffer[-1] == b'\n':
+            if recbuffer[0] == b"\x04":
+                del recbuffer[:1]  # remove the 0x04 that demarks the start of the exception
             stdout.write(b"".join(recbuffer).decode("utf8"))
             stdout.write(EXT_PROMPT_OUTPUT)
             recbuffer.clear()
