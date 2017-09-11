@@ -64,6 +64,11 @@ async def transferline():
                 swrite("DSerial connection state is {} {}\n".format(serialstate, str([line])), 
                        (EXT_PROMPT if line.strip() == "%%D" else EXT_PROMPT_CONTINUATION))
                    
+        elif line.strip() == "%%REBOOT":
+            workingserial.write(b"\x02\r")  # exit the paste mode with ctrl-B
+            workingserial.write(b"\x04\r")  # soft reboot code
+            serialstate = "justconnected"   # set into state where it re-enters the paste mode
+
         elif line.strip() == "%%D":
             workingserial.write(b"\x04\r")
             serialstate = "rawmodecodesent"

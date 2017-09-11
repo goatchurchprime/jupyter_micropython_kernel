@@ -1,12 +1,5 @@
 from ipykernel.kernelbase import Kernel
-from pexpect import replwrap, EOF
-import pexpect
-
-from subprocess import check_output
-import os.path
-
-import re, logging
-import signal
+import logging, sys, pexpect
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -33,7 +26,7 @@ class MicroPythonKernel(Kernel):
         self.startasyncmodule()
 
     def startasyncmodule(self):
-        self.asyncmodule = pexpect.spawn("python", ['-m', 'jupyter_micropython_kernel.asyncmodule.py'], echo=False, encoding='utf-8', codec_errors='replace')
+        self.asyncmodule = pexpect.spawn(sys.executable, ['-m', 'jupyter_micropython_kernel.asyncmodule.py'], echo=False, encoding='utf-8', codec_errors='replace')
         self.asyncmodule.expect_exact([EXT_PROMPT])
         logger.info(["init", self.asyncmodule.before])
 
@@ -53,7 +46,10 @@ class MicroPythonKernel(Kernel):
                 self.asyncmodule.sendline("O.write({})".format(repr(line)))
             self.asyncmodule.sendline("O.close()")
             self.asyncmodule.sendline("%%D")
-            self.process_output("{} lines send".format(len(cmdlines)-line1))
+            self.process_output("{} lines sent".format(len(cmdlines)-line1))
+
+        elif cmdlines[0][:8] == "%%REBOOT":
+            self.asyncmodule.sendline("%%REBOOT")
 
         # run the cell contents as normal
         else:
@@ -92,24 +88,15 @@ class MicroPythonKernel(Kernel):
             interrupted = True
             self.receivestream()
 
-        except EOF:
+        except pexpect.EOF:
             self.process_output(self.asyncmodule.before + 'Restarting Bash')
             self.startasyncmodule()
 
         if interrupted:
             return {'status': 'abort', 'execution_count': self.execution_count}
 
-        exitcode = 0
-        if exitcode:
-            error_content = {'execution_count': self.execution_count,
-                             'ename': '', 'evalue': str(exitcode), 'traceback': []}
-
-            self.send_response(self.iopub_socket, 'error', error_content)
-            error_content['status'] = 'error'
-            return error_content
-        else:
-            return {'status': 'ok', 'execution_count': self.execution_count,
-                    'payload': [], 'user_expressions': {}}
+        # everything already gone out with send_response(), but could detect errors (text between the two \x04s
+        return {'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {}}
                     
 
     # to do (if possible, though might be difficult in paste mode): word completion technology!
