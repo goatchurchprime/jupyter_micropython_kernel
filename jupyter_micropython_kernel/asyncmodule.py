@@ -16,10 +16,9 @@ eloop = asyncio.get_event_loop()
 eloop.set_debug(True)
 stdout = sys.stdout
 
-sermessages = asyncio.Queue()
-ser = None
-replstate = "unknown"     # rawrequested, rawmode
-commandstate = "unknown"  # ready, streamingto, awaitingresult, returningresult
+workingserial = None
+serialstate = "notconnected"
+serialinitialsignal = asyncio.Queue()
 
 def swrite(msg, prompt):
     stdout.write(msg)
@@ -28,143 +27,107 @@ def swrite(msg, prompt):
 
 # print(_) to get last variable result
 async def transferline():
-    global replstate, commandstate, ser
+    global replstate, serialstate, workingserial
     while True:
       try:
         line = await eloop.run_in_executor(None, sys.stdin.readline)
+        
         if line[:6] == "%%CONN":
             bline = line[6:].strip() or "/dev/ttyUSB0 115200"
             bline = bline.split()
-            strerror = None
+            if workingserial is not None:
+                swrite("Closing old serial\n", EXT_PROMPT_OUTPUT)
+                workingserial.close() 
+                workingserial = None
             swrite("Connecting to Serial({}, {})\n".format(bline[0], bline[1]), EXT_PROMPT_OUTPUT)
-            ser = None  # should close original connection
             try:
-                ser = serial.Serial(bline[0], int(bline[1]))
+                workingserial = serial.Serial(bline[0], int(bline[1]))
             except serial.SerialException as e:
-                strerror = e.strerror
-            if strerror:
-                swrite(strerror, EXT_PROMPT)
-                continue
+                swrite(e.strerror, EXT_PROMPT)
 
             # this cycle could be done via the sermessages queue
-            swrite(str(ser), EXT_PROMPT_OUTPUT)
-            ser.write(b'\r\x03\x03') # ctrl-C twice: interrupt any running program
-            while ser.inWaiting() != 0:
-                ser.read(1)
-            ser.write(b'\r\x01') # ctrl-A: enter raw REPL
-            replstate = "rawrequested"
-            logger.info("%%{}".format(replstate))
-            stdout.write("\n")
-            stdout.write(EXT_PROMPT_CONTINUATION)
-            stdout.flush()
-            sermessages.put_nowait("conn")
-            continue
+            if workingserial is not None:
+                serialstate = "justconnected"
+                serialinitialsignal.put_nowait("go")  # unstick the serialinitialsignal.get() at start of serreadchar()
 
-        if line.strip() == "%%S":
-            stdout.write(str([replstate, "serinwaiting", ser, (ser and ser.inWaiting()), recbuffer]))
-            stdout.write("\n")
-            stdout.write(EXT_PROMPT)
-            stdout.flush()
-            continue
+        elif line.strip() == "%%C":
+            print("Recevied %%C", serialstate)
+            if serialstate == "rawmodereceiving":
+                workingserial.write(b'\r\x03')        # ctrl-C to interrupt running program
                 
-        if ser is None:
-            stdout.write(str(line))
-            stdout.write("   We have no connection yet\n")
-            if line.strip() == "%%D":
-                stdout.write(EXT_PROMPT)
-            else:
-                stdout.write(EXT_PROMPT_CONTINUATION)
-            stdout.flush()
-            continue
+        elif workingserial is None:
+            swrite("Serial connection state is {} {}\n".format(serialstate, str([line])), 
+                   (EXT_PROMPT if line.strip() == "%%D" else EXT_PROMPT_CONTINUATION))
+        
+        elif serialstate != "rawmodeready":
+            if line.strip():  # trim out loose '\n's that get through
+                swrite("DSerial connection state is {} {}\n".format(serialstate, str([line])), 
+                       (EXT_PROMPT if line.strip() == "%%D" else EXT_PROMPT_CONTINUATION))
+                   
+        elif line.strip() == "%%D":
+            workingserial.write(b"\x04\r")
+            serialstate = "rawmodecodesent"
             
-        if line[:2] == "%%":
-            line = line[2:].strip()
-            if line[0] == "S":
-                print(replstate, "serinwaiting", ser.inWaiting(), recbuffer)
-
-            if line[0] == "C":
-                ser.write(b'\r\x03') # ctrl-B ctrl-C twice: interrupt any running program
-                
-            elif line[0] == "R":  # request raw webrepl
-                ser.write(b'\r\x03\x03') # ctrl-C twice: interrupt any running program
-                while ser.inWaiting() != 0:
-                    ser.read(1)
-                ser.write(b'\r\x01') # ctrl-A: enter raw REPL
-                replstate = "rawrequested"
-                logger.info("%%{}".format(replstate))
-                
-            elif line[0] == "D":  # end of series
-                commandstate = "awaitingresult"
-                await eloop.run_in_executor(None, ser.write, b"\x04\r")
-                    # the response is then "OK[someoutput]\x04[erroroutput]\x04>"
-                
-            elif line[0] == "F":  # should always be empty
-                print("fetching")
-                while ser.inWaiting() != 0:
-                    print(ser.read(1), end="")
-                print(".....")
-
         else:
-            if commandstate == "ready":
-                commandstate = "streamingto"
-            await eloop.run_in_executor(None, ser.write, (line+"\r").encode("utf8"))
-            stdout.write("\n")
-            stdout.write(EXT_PROMPT_CONTINUATION)
-            stdout.flush()
+            workingserial.write((line+"\r").encode("utf8"))
+            swrite("\n", EXT_PROMPT_CONTINUATION)
       except Exception as e:
         print("eeek", type(e), e)
 
-srr = bytearray(b'raw REPL; CTRL-B to exit\r\n>')
-sok = bytearray(b'OK')
-sstop = bytearray(b'\x04>')  # there's two \x04s if not an exception
+def bytecharlist(b):  return [chr(c).encode("utf8")  for c in b]
+srr = bytecharlist(b'raw REPL; CTRL-B to exit\r\n>')
+sok = bytecharlist(b'OK')
+sstop = bytecharlist(b'\x04>')  # there's two \x04s if not an exception
+
 recbuffer = [ ]
 async def serreadchar():
-    global replstate, commandstate
+    global replstate, serialstate, workingserial
     while True:
       try:
         # this should await not zero
-        while ser is None:
-            logger.info("Type %%CONN to connect")
-            await sermessages.get()
-            
-        c = await eloop.run_in_executor(None, ser.read, 1)
-        
-        recbuffer.append(c)
-        if replstate == "rawrequested" and recbuffer[-1] == b'>':
-            if bytearray(ord(b) for b in recbuffer[-len(srr):]) == srr:  # there has to be a better way
-                replstate = "rawmode"
-                commandstate = "ready"
-                logger.info("%% {} {}".format(replstate, commandstate))
-                stdout.write("\n")
-                stdout.write("hip")
-                stdout.write("\n")
-                stdout.write(EXT_PROMPT_CONTINUATION)
-                stdout.write("\n")
-                stdout.write(EXT_PROMPT)
-                stdout.flush()
-                recbuffer.clear()
-                stdout.flush()
+        if workingserial is None:
+            await serialinitialsignal.get()    # effectively waiting for workingserial to not be None
+        elif serialstate == "justconnected":
+            workingserial.write(b'\r\x03\x03') # ctrl-C twice: interrupt any running program
+            serialstate = "waitforinitialclear"
+        elif serialstate == "waitforinitialclear":
+            while workingserial.inWaiting() != 0:
+                workingserial.read(1)
+            workingserial.write(b'\r\x01')     # ctrl-A: enter raw REPL
+            serialstate = "rawmoderequested"
+        else:
+            try:
+                c = await eloop.run_in_executor(None, workingserial.read, 1)
+            except serial.SerialException as e:
+                swrite(str(e), EXT_PROMPT)   # e.strerror is None (how?)
+                workingserial = None
+                serialstate = "notconnected"
+                continue
                 
-        if commandstate == "awaitingresult":
-            if bytearray(ord(b) for b in recbuffer[-len(sok):]) == sok:
-                commandstate = "returningresult"
-                logger.info("%% {}".format(commandstate))
+            recbuffer.append(c)
+            if serialstate == "rawmoderequested":
+                if recbuffer[-1] == b'>' and recbuffer[-len(srr):] == srr:
+                    serialstate = "rawmodeready"
+                    swrite("ready", EXT_PROMPT)
+                    recbuffer.clear()
+                
+        if serialstate == "rawmodecodesent":
+            if recbuffer[-len(sok):] == sok:
+                serialstate = "rawmodereceiving"
                 recbuffer.clear()
         
-        if commandstate == "returningresult":
-            if bytearray(ord(b) for b in recbuffer[-len(sstop):]) == sstop:
-                commandstate = "ready"
-                logger.info("%% {}".format(commandstate))
+        if serialstate == "rawmodereceiving":
+            if recbuffer[-len(sstop):] == sstop:
+                serialstate = "rawmodeready"
+                logger.info("%% {}".format(serialstate))
                 recbuffer.clear()
-                stdout.write(EXT_PROMPT)
-                stdout.flush()
+                swrite("", EXT_PROMPT)
                 
-        if commandstate == "returningresult" and len(recbuffer) and recbuffer[-1] == b'\n':
-            if recbuffer[0] == b"\x04":
-                del recbuffer[:1]  # remove the 0x04 that demarks the start of the exception
-            stdout.write(b"".join(recbuffer).decode("utf8"))
-            stdout.write(EXT_PROMPT_OUTPUT)
-            recbuffer.clear()
+            elif len(recbuffer) and recbuffer[-1] == b'\n':
+                if recbuffer[0] == b"\x04":
+                    del recbuffer[:1]  # remove the 0x04 that demarks the start of the exception
+                swrite(b"".join(recbuffer).decode("utf8"), EXT_PROMPT_OUTPUT)
+                recbuffer.clear()
         
         await asyncio.sleep(0.001)
       except Exception as e:

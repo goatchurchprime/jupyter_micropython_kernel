@@ -94,6 +94,7 @@ class MicroPythonKernel(Kernel):
         try:
             self.bashwrapper.run_command(code.rstrip())
         except KeyboardInterrupt:
+            logger.info("Sending %%C")
             self.bashwrapper.child.sendline("%%C\n")
             #self.bashwrapper.child.sendintr()
             interrupted = True
