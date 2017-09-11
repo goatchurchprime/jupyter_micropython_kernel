@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 EXT_PROMPT = '[serPROMPT>'
 EXT_PROMPT_CONTINUATION = '[serPROMPT+'
+EXT_PROMPT_OUTPUT = '[serPROMPT:'
 
 class EREPLWrapper(object):
     def __init__(self, child, line_output_callback):
@@ -38,24 +39,12 @@ class EREPLWrapper(object):
         
         pos = 1
         while pos != 0:
-            pos = self.child.expect_exact([EXT_PROMPT, EXT_PROMPT_CONTINUATION], timeout=None)
+            pos = self.child.expect_exact([EXT_PROMPT, EXT_PROMPT_CONTINUATION, EXT_PROMPT_OUTPUT], timeout=None)
             logger.info(["rec:", pos, self.child.before])
-            self.line_output_callback(self.child.before + '\n')
+            if pos != 1:
+                self.line_output_callback(self.child.before)
         
         
-    def _expect_prompt(self):
-        # "None" means we are executing code from a Jupyter cell by way of the run_command
-        # in the do_execute() code below, so do incremental output.
-        while True:
-            pos = self.child.expect_exact([EXT_PROMPT, EXT_PROMPT_CONTINUATION, u'\n'], timeout=None)
-            logger.info(["expro:", pos, self.child.before])
-            if pos == 2:
-                self.line_output_callback(self.child.before + '\n')
-            else:
-                if len(self.child.before) != 0:
-                    self.line_output_callback(self.child.before)
-                break
-        return pos
 
 
 class MicroPythonKernel(Kernel):
@@ -88,7 +77,6 @@ class MicroPythonKernel(Kernel):
         finally:
             signal.signal(signal.SIGINT, sig)
 
-
     def process_output(self, output):
         if not self.silent:
             # Send standard output
@@ -109,7 +97,7 @@ class MicroPythonKernel(Kernel):
             self.bashwrapper.child.sendline("%%C\n")
             #self.bashwrapper.child.sendintr()
             interrupted = True
-            self.bashwrapper._expect_prompt()
+            self.bashwrapper.child.expect_exact([EXT_PROMPT])
             output = self.bashwrapper.child.before
             self.process_output(output)
         except EOF:
@@ -131,41 +119,12 @@ class MicroPythonKernel(Kernel):
         else:
             return {'status': 'ok', 'execution_count': self.execution_count,
                     'payload': [], 'user_expressions': {}}
+                    
 
-    def do_complete(self, code, cursor_pos):
-        code = code[:cursor_pos]
-        default = {'matches': [], 'cursor_start': 0,
-                   'cursor_end': cursor_pos, 'metadata': dict(),
-                   'status': 'ok'}
-
-        if not code or code[-1] == ' ':
-            return default
-
-        tokens = code.replace(';', ' ').split()
-        if not tokens:
-            return default
-
-        matches = []
-        token = tokens[-1]
-        start = cursor_pos - len(token)
-
-        if token[0] == '$':
-            # complete variables
-            cmd = 'compgen -A arrayvar -A export -A variable %s' % token[1:] # strip leading $
-            output = self.bashwrapper.run_command(cmd).rstrip()
-            completions = set(output.split())
-            # append matches including leading $
-            matches.extend(['$'+c for c in completions])
-        else:
-            # complete functions and builtins
-            cmd = 'compgen -cdfa %s' % token
-            output = self.bashwrapper.run_command(cmd).rstrip()
-            matches.extend(output.split())
-
-        if not matches:
-            return default
-        matches = [m for m in matches if m.startswith(token)]
-
-        return {'matches': sorted(matches), 'cursor_start': start,
-                'cursor_end': cursor_pos, 'metadata': dict(),
-                'status': 'ok'}
+    # to do (if possible, though might be difficult in paste mode): word completion technology!
+    #def do_complete(self, code, cursor_pos):
+    #    code = code[:cursor_pos]
+    #    default = {'matches': [], 'cursor_start': 0,
+    #               'cursor_end': cursor_pos, 'metadata': dict(),
+    #               'status': 'ok'}
+    #    return default

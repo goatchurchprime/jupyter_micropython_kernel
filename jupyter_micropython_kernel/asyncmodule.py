@@ -7,14 +7,14 @@ import asyncio, serial
 
 EXT_PROMPT = '[serPROMPT>'
 EXT_PROMPT_CONTINUATION = '[serPROMPT+'
+EXT_PROMPT_OUTPUT = '[serPROMPT:'
 
-#logger = logging.getLogger(__name__)
-#logger.setLevel(logging.DEBUG)
-logging.basicConfig(level=logging.INFO, format='%(lineno)d - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.WARNING, format='%(lineno)d - %(levelname)s - %(message)s')
 logger = logging
 
 eloop = asyncio.get_event_loop()
 eloop.set_debug(True)
+stdout = sys.stdout
 
 sermessages = asyncio.Queue()
 ser = None
@@ -46,30 +46,30 @@ async def transferline():
                 ser.write(b'\r\x01') # ctrl-A: enter raw REPL
                 replstate = "rawrequested"
                 logger.info("%%{}".format(replstate))
-                sys.stdout.write("\n")
-                sys.stdout.write(EXT_PROMPT_CONTINUATION)
-                sys.stdout.flush()
+                stdout.write("\n")
+                stdout.write(EXT_PROMPT_CONTINUATION)
+                stdout.flush()
                 sermessages.put_nowait("conn")
                 continue
             else:
-                sys.stdout.write("   serial connection failed\n")
+                stdout.write("   serial connection failed\n")
                 line = "fff"
 
         if line.strip() == "%%S":
-            sys.stdout.write(str([replstate, "serinwaiting", ser, (ser and ser.inWaiting()), recbuffer]))
-            sys.stdout.write("\n")
-            sys.stdout.write(EXT_PROMPT)
-            sys.stdout.flush()
+            stdout.write(str([replstate, "serinwaiting", ser, (ser and ser.inWaiting()), recbuffer]))
+            stdout.write("\n")
+            stdout.write(EXT_PROMPT)
+            stdout.flush()
             continue
                 
         if ser is None:
-            sys.stdout.write(str(line))
-            sys.stdout.write("   We have no connection yet\n")
+            stdout.write(str(line))
+            stdout.write("   We have no connection yet\n")
             if line.strip() == "%%D":
-                sys.stdout.write(EXT_PROMPT)
+                stdout.write(EXT_PROMPT)
             else:
-                sys.stdout.write(EXT_PROMPT_CONTINUATION)
-            sys.stdout.flush()
+                stdout.write(EXT_PROMPT_CONTINUATION)
+            stdout.flush()
             continue
             
         if line[:2] == "%%":
@@ -91,7 +91,6 @@ async def transferline():
             elif line[0] == "D":  # end of series
                 commandstate = "awaitingresult"
                 await eloop.run_in_executor(None, ser.write, b"\x04\r")
-                print("%%", commandstate)
                 
             elif line[0] == "F":  # should always be empty
                 print("fetching")
@@ -103,10 +102,9 @@ async def transferline():
             if commandstate == "ready":
                 commandstate = "streamingto"
             await eloop.run_in_executor(None, ser.write, (line+"\r").encode("utf8"))
-            sys.stdout.write("\n")
-            sys.stdout.write(EXT_PROMPT_CONTINUATION)
-            sys.stdout.flush()
-            logger.info("%% {}".format(commandstate))
+            stdout.write("\n")
+            stdout.write(EXT_PROMPT_CONTINUATION)
+            stdout.flush()
       except Exception as e:
         print("eeek", type(e), e)
 
@@ -131,15 +129,15 @@ async def serreadchar():
                 replstate = "rawmode"
                 commandstate = "ready"
                 logger.info("%% {} {}".format(replstate, commandstate))
-                sys.stdout.write("\n")
-                sys.stdout.write("hip")
-                sys.stdout.write("\n")
-                sys.stdout.write(EXT_PROMPT_CONTINUATION)
-                sys.stdout.write("\n")
-                sys.stdout.write(EXT_PROMPT)
-                sys.stdout.flush()
+                stdout.write("\n")
+                stdout.write("hip")
+                stdout.write("\n")
+                stdout.write(EXT_PROMPT_CONTINUATION)
+                stdout.write("\n")
+                stdout.write(EXT_PROMPT)
+                stdout.flush()
                 recbuffer.clear()
-                sys.stdout.flush()
+                stdout.flush()
                 
         if commandstate == "awaitingresult":
             if bytearray(ord(b) for b in recbuffer[-len(sok):]) == sok:
@@ -152,12 +150,12 @@ async def serreadchar():
                 commandstate = "ready"
                 logger.info("%% {}".format(commandstate))
                 recbuffer.clear()
-                sys.stdout.write(EXT_PROMPT)
-                sys.stdout.flush()
+                stdout.write(EXT_PROMPT)
+                stdout.flush()
                 
         if commandstate == "returningresult" and len(recbuffer) and recbuffer[-1] == b'\n':
-            sys.stdout.write(b"".join(recbuffer).decode("utf8"))
-            sys.stdout.write(EXT_PROMPT_CONTINUATION)
+            stdout.write(b"".join(recbuffer).decode("utf8"))
+            stdout.write(EXT_PROMPT_OUTPUT)
             recbuffer.clear()
         
         await asyncio.sleep(0.001)
@@ -166,8 +164,8 @@ async def serreadchar():
 
 print("%%R to enter raw webrepl mode")
 print("%%D to end block of code")
-sys.stdout.write(EXT_PROMPT)
-sys.stdout.flush()
+stdout.write(EXT_PROMPT)
+stdout.flush()
 
 t1 = eloop.create_task(serreadchar())
 t2 = eloop.create_task(transferline())
