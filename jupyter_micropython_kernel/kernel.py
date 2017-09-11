@@ -38,13 +38,29 @@ class MicroPythonKernel(Kernel):
         logger.info(["init", self.asyncmodule.before])
 
     def sendcommand(self, command):
-        cmdlines = command.splitlines()
-        cmdlines.append("\n")
-        for line in cmdlines:
-            logger.debug(["sending:", line])
-            self.asyncmodule.sendline(line)   # send straight through.  Buffering at async end
-        if cmdlines[0][:6] != "%%CONN":
-            self.asyncmodule.sendline("%%D\n")
+        cmdlines = command.splitlines(True)
+        
+        # Instantiate a connection %%CONN port baudrate
+        if cmdlines[0][:6] == "%%CONN":
+            self.asyncmodule.sendline(cmdlines[0])   # connection type
+            
+        # copy cell contents into a file on the device (by hackily saving it)
+        elif cmdlines[0][:6] == "%%FILE":
+            fname = cmdlines[0].split()[1]
+            self.asyncmodule.sendline("O=open({}, 'w')".format(repr(fname)))
+            line1 = 1 if (len(cmdlines)<=1 or cmdlines[1].strip()) else 2  # trim first blank line if blank
+            for line in cmdlines[line1:]:
+                self.asyncmodule.sendline("O.write({})".format(repr(line)))
+            self.asyncmodule.sendline("O.close()")
+            self.asyncmodule.sendline("%%D")
+            self.process_output("{} lines send".format(len(cmdlines)-line1))
+
+        # run the cell contents as normal
+        else:
+            for line in cmdlines:
+                logger.debug(["sending:", line])
+                self.asyncmodule.send(line)   # send straight through.  Buffering at async end
+            self.asyncmodule.sendline("\n%%D")
 
     def receivestream(self):
         pos = 1
