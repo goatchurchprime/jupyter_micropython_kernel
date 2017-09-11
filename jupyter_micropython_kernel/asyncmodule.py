@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-# code taken from: https://bitbucket.org/goatchurch/bbhquad/src/14a0120f951ca10cbe4acb67efd5f9dc7a22684b/polarcode/websocketmodule.py?at=master&fileviewer=file-view-default
-
 import sys, logging
 import asyncio, serial
 

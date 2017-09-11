@@ -4,6 +4,7 @@ import logging, sys, pexpect
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# these are used as delimeters between 
 EXT_PROMPT = '[serPROMPT>'
 EXT_PROMPT_CONTINUATION = '[serPROMPT+'
 EXT_PROMPT_OUTPUT = '[serPROMPT:'
@@ -98,11 +99,3 @@ class MicroPythonKernel(Kernel):
         # everything already gone out with send_response(), but could detect errors (text between the two \x04s
         return {'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {}}
                     
-
-    # to do (if possible, though might be difficult in paste mode): word completion technology!
-    #def do_complete(self, code, cursor_pos):
-    #    code = code[:cursor_pos]
-    #    default = {'matches': [], 'cursor_start': 0,
-    #               'cursor_end': cursor_pos, 'metadata': dict(),
-    #               'status': 'ok'}
-    #    return default
