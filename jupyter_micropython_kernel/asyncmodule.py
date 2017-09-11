@@ -14,16 +14,17 @@ logger = logging
 
 eloop = asyncio.get_event_loop()
 eloop.set_debug(True)
-stdout = sys.stdout
 
-workingserial = None
+
+# this encapsulates a state machine for the condition of the serial line
 serialstate = "notconnected"
+workingserial = None
 serialinitialsignal = asyncio.Queue()
 
 def swrite(msg, prompt):
-    stdout.write(msg)
-    stdout.write(prompt)
-    stdout.flush()
+    sys.stdout.write(msg)
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
 
 # print(_) to get last variable result
 async def transferline():
@@ -51,7 +52,6 @@ async def transferline():
                 serialinitialsignal.put_nowait("go")  # unstick the serialinitialsignal.get() at start of serreadchar()
 
         elif line.strip() == "%%C":
-            print("Recevied %%C", serialstate)
             if serialstate == "rawmodereceiving":
                 workingserial.write(b'\r\x03')        # ctrl-C to interrupt running program
                 
@@ -133,11 +133,7 @@ async def serreadchar():
       except Exception as e:
         print("ddeeek", type(e), e)
 
-print("%%R to enter raw webrepl mode")
-print("%%D to end block of code")
-stdout.write(EXT_PROMPT)
-stdout.flush()
-
+swrite("%%D to end block of code", EXT_PROMPT)
 t1 = eloop.create_task(serreadchar())
 t2 = eloop.create_task(transferline())
 eloop.run_forever()
