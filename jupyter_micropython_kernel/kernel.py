@@ -4,7 +4,7 @@ import logging, sys, serial, time
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-
+# merge uncoming serial stream and break at OK, \x04, >, \r\n, and long delays 
 def yieldserialchunk(s):
     res = [ ]
     n = 0
@@ -12,7 +12,10 @@ def yieldserialchunk(s):
         try:
             b = s.read()
         except serial.SerialException as e:
-            yield e.strerror
+            yield str(e).encode("utf8")
+            yield str(type(e)).encode("utf8")
+            break
+            
         if not b:
             if res and (res[0] != 'O' or len(res) > 3 or True):
                 yield b''.join(res)
@@ -74,8 +77,9 @@ class MicroPythonKernel(Kernel):
             except serial.SerialException as e:
                 self.process_output(e.strerror)
 
-            self.process_output("Serial connected {}\n".format(str(self.workingserial)))
-            self.enterpastemode()
+            if self.workingserial:
+                self.process_output("Serial connected {}\n".format(str(self.workingserial)))
+                self.enterpastemode()
 
         elif self.workingserial is None:
             self.process_output("No serial connected")
@@ -93,11 +97,36 @@ class MicroPythonKernel(Kernel):
             self.workingserial.write(b"\x04\r")  # soft reboot code
             self.enterpastemode()
 
-        elif cmdlines[0][:6] == "%%HELP":
+        # copy cell contents into a file on the device (by hackily saving it)
+        elif cmdlines[0][:6] == "%%FILE":
+            for i, line in enumerate(cmdlines):
+                if i == 0:
+                    fname = cmdlines[0].split()[1]
+                    self.workingserial.write("O=open({}, 'w')\r\n".format(repr(fname)).encode("utf8"))
+                    continue
+                    
+                if i == 1 and not line.strip():
+                    continue   # skip first blank line
+                    
+                self.workingserial.write("O.write({})\r\n".format(repr(line)).encode("utf8"))
+                if (i%10) == 0:
+                    self.workingserial.write(b'\r\x04')
+                    self.receivestream(bseekokay=True)
+                    self.process_output("{} lines sent so far\n".format(i))
+
+            self.workingserial.write("O.close()\r\n".encode("utf8"))
+            self.workingserial.write(b'\r\x04')
+            self.receivestream(bseekokay=True)
+            self.process_output("{} lines sent done".format(len(cmdlines)-1))
+
+
+        elif cmdlines[0].strip() == "%lsmagic":
+            self.process_output("%%CONN /dev/ttyUSB0 115200\n")
             self.process_output("%%CHECK does serial.read_all()\n")
             self.process_output("%%RECS does interpret stream normally\n")
             self.process_output("%%NOREC at start suppresses receivestream\n")
             self.process_output("%%REBOOT reboots device\n")
+            self.process_output("%%FILE name.py uploads subsequent text to file\n")
 
         # run the cell contents as normal
         else:
@@ -141,11 +170,12 @@ class MicroPythonKernel(Kernel):
 
     def receivestream(self, bseekokay, bwarnokaypriors=True):
         n04count = 0
-        while True:  # for restarting the chunking when interrupted
+        for j in range(2):  # for restarting the chunking when interrupted
             if self.workingserialchunk is None:
                 self.workingserialchunk = yieldserialchunk(self.workingserial)
             
             for i, rline in enumerate(self.workingserialchunk):
+                assert rline is not None
                 if rline == b'OK' and bseekokay:
                     if i != 0 and bwarnokaypriors:
                         self.process_output("\n\n[Late OK]\n\n")
@@ -192,21 +222,23 @@ class MicroPythonKernel(Kernel):
         interrupted = False
         try:
             self.sendcommand(code)
-            
         except KeyboardInterrupt:
+            interrupted = True
+        except OSError as e:
+            self.process_output("\n\n*** [%s]\n\n" % str(e.strerror))
+        #except pexpect.EOF:
+        #    self.process_output(self.asyncmodule.before + 'Restarting Bash')
+        #    self.startasyncmodule()
+
+        if interrupted:
             logger.info("Sending %%C")
             self.process_output("\n\n*** Sending x03\n\n")
             if self.workingserial:
                 self.workingserial.write(b'\r\x03')
                 interrupted = True
                 self.receivestream(bseekokay=False)
-
-        #except pexpect.EOF:
-        #    self.process_output(self.asyncmodule.before + 'Restarting Bash')
-        #    self.startasyncmodule()
-
-        if interrupted:
             return {'status': 'abort', 'execution_count': self.execution_count}
+
 
         # everything already gone out with send_response(), but could detect errors (text between the two \x04s
         return {'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {}}
