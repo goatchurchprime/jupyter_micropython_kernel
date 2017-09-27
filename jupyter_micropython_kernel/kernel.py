@@ -82,7 +82,7 @@ class MicroPythonKernel(Kernel):
                 self.enterpastemode()
 
         elif self.workingserial is None:
-            self.process_output("No serial connected")
+            self.process_output("No serial connected; write %%CONN to connect")
 
         elif cmdlines[0][:7] == "%%CHECK":
             l = self.workingserial.read_all()
@@ -157,6 +157,7 @@ class MicroPythonKernel(Kernel):
                 self.receivestream(bseekokay=True)
 
     def enterpastemode(self):
+        assert self.workingserial
         # now sort out connection situation
         self.workingserial.write(b'\r\x03\x03')    # ctrl-C: kill off running programs
         l = self.workingserial.read_all()
@@ -170,10 +171,12 @@ class MicroPythonKernel(Kernel):
 
     def receivestream(self, bseekokay, bwarnokaypriors=True):
         n04count = 0
+        brebootdetected = False
         for j in range(2):  # for restarting the chunking when interrupted
             if self.workingserialchunk is None:
                 self.workingserialchunk = yieldserialchunk(self.workingserial)
-            
+ 
+            indexprevgreaterthansign = -1
             for i, rline in enumerate(self.workingserialchunk):
                 assert rline is not None
                 if rline == b'OK' and bseekokay:
@@ -183,8 +186,10 @@ class MicroPythonKernel(Kernel):
                     continue
                     
                 elif bseekokay and bwarnokaypriors:
-                    self.process_output("\n[missing-OK]")
+                    if (rline != b'>') and rline.strip()):
+                        self.process_output("\n[missing-OK]")
                     
+                # leaving condition where OK...x04...x04...> has been found
                 if n04count >= 2 and rline == b'>' and not bseekokay:
                     if n04count != 2:
                         self.process_output("[too many x04s %d]" % n04count)
@@ -193,9 +198,20 @@ class MicroPythonKernel(Kernel):
                 if rline == b'\x04':
                     n04count += 1
                     continue
+
+                if rline == b'Type "help()" for more information.\r\n':
+                    brebootdetected = True
+                if rline == b'>':
+                    indexprevgreaterthansign = i
                     
-                if bseekokay and not bwarnokaypriors and (rline == b'>' or not rline.strip()):
-                    continue
+                # looks for ">>> "
+                if brebootdetected and rline == b' ' and indexprevgreaterthansign == i-1: 
+                    self.process_output("[reboot detected]" % n04count)
+                    self.enterpastemode()  # unintentionally recursive, this
+                    break
+                    
+                #if bseekokay and not bwarnokaypriors and (rline == b'>' or not rline.strip()):
+                #    continue
                     
                 try:
                     ur = rline.decode("utf8")
