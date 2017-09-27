@@ -206,7 +206,7 @@ class MicroPythonKernel(Kernel):
                     
                 # looks for ">>> "
                 if brebootdetected and rline == b' ' and indexprevgreaterthansign == i-1: 
-                    self.process_output("[reboot detected]" % n04count)
+                    self.process_output("[reboot detected %d]" % n04count)
                     self.enterpastemode()  # unintentionally recursive, this
                     break
                     
