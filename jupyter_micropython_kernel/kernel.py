@@ -82,7 +82,7 @@ class MicroPythonKernel(Kernel):
                 self.enterpastemode()
 
         elif self.workingserial is None:
-            self.process_output("No serial connected; write %%CONN to connect")
+            self.process_output("No serial connected; write %%CONN to connect; %lsmagic to list commands")
 
         elif cmdlines[0][:7] == "%%CHECK":
             l = self.workingserial.read_all()
@@ -186,7 +186,7 @@ class MicroPythonKernel(Kernel):
                     continue
                     
                 elif bseekokay and bwarnokaypriors:
-                    if (rline != b'>') and rline.strip()):
+                    if (rline != b'>') and rline.strip():
                         self.process_output("\n[missing-OK]")
                     
                 # leaving condition where OK...x04...x04...> has been found
