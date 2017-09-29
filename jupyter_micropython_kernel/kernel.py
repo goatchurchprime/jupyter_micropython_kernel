@@ -137,10 +137,24 @@ class MicroPythonKernel(Kernel):
             self.enterpastemode()
 
         # copy cell contents into a file on the device (by hackily saving it)
-        elif cmdline00 == "%%FILE":
+        elif cmdline00 == "%sendtofile":
+            cmdattr = cmdline0.split()[1:]
+            bsendasbinary = False
+            fsource = None
+            fname = "uploadfile"
+
+            # need to parse string with quotes (maybe use the settings command line thing to parse)
+            if len(cmdattr) >= 1 and cmdattr[0] == '-b':
+                bsendasbinary = True
+                del cmdattr[0]
+            if len(cmdattr) >= 2 and cmdattr[0] == '-src':
+                fsource = cmdattr[1]
+                del cmdattr[:2]
+            if len(cmdattr) >= 1:
+                fname = cmdattr[0]
+
             for i, line in enumerate(cmdlines):
                 if i == 0:
-                    fname = cmdlines[0].split()[1]
                     self.workingserial.write("O=open({}, 'w')\r\n".format(repr(fname)).encode("utf8"))
                     continue
                     
@@ -163,10 +177,10 @@ class MicroPythonKernel(Kernel):
             self.process_output("%serialconnect [/dev/ttyUSB0] [115200]\n")
             self.process_output("%suppressendcode doesn't send x04 or wait to read after sending the cell\n")
             self.process_output("  (assists for debugging using %writebytes and %readbytes)\n")
-            self.process_output("%writebutes does serial.write() on a string b'binary_stuff' \n")
+            self.process_output("%writebytes does serial.write() on a string b'binary_stuff' \n")
             self.process_output("%readbytes does serial.read_all()\n")
             self.process_output("%rebootdevice reboots device\n")
-            self.process_output("%%FILE name.py uploads subsequent text to file\n")
+            self.process_output("%sendtofile name.py uploads subsequent text to file\n")
 
         # run the cell contents as normal
         else:
