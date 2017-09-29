@@ -8,15 +8,8 @@ from IPython.utils.tempdir import TemporaryDirectory
 
 # copied out from https://github.com/takluyver/bash_kernel/blob/master/bash_kernel/install.py
 
-#kernel_json = {"argv":[sys.executable,"-m","bash_kernel", "-f", "{connection_file}"],
-# "display_name":"Bash",
-# "language":"bash",
-# "codemirror_mode":"shell",
-# "env":{"PS1": "$"}
-#}
-
-kernel_json = { "argv": ["python3","-m", "jupyter_micropython_kernel", "/dev/ttyUSB0", "115200", "-f", "{connection_file}"],
- "display_name": "MicroPython - /dev/ttyUSB0",
+kernel_json = { "argv": ["python3","-m", "jupyter_micropython_kernel", "-f", "{connection_file}"],
+ "display_name": "MicroPython through serial",
  "language": "micropython"
 }
 

@@ -1,8 +1,11 @@
 from ipykernel.kernelbase import Kernel
-import logging, sys, serial, time
+import logging, sys, serial, time, os
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+serialtimeout = 0.5
+serialtimeoutcount = 10
 
 # merge uncoming serial stream and break at OK, \x04, >, \r\n, and long delays 
 def yieldserialchunk(s):
@@ -17,13 +20,13 @@ def yieldserialchunk(s):
             break
             
         if not b:
-            if res and (res[0] != 'O' or len(res) > 3 or True):
+            if res and (res[0] != 'O' or len(res) > 3):
                 yield b''.join(res)
                 res.clear()
             else:
                 n += 1
-                if (n%10) == 0:
-                    yield b'.'
+                if (n%serialtimeoutcount) == 0:
+                    yield b''   # yield a blank line every (serialtimeout*serialtimeoutcount) seconds
                 
         elif b == b'K' and len(res) >= 1 and res[-1] == b'O':
             if len(res) > 1:
@@ -41,6 +44,9 @@ def yieldserialchunk(s):
                 yield b''.join(res)
                 res.clear()
 
+# this should take account of the operating system
+def guessserialport():  
+    return sorted([ os.path.join("/dev/", k)  for k in os.listdir("/dev/")  if k[:6] == "ttyUSB" ])
 
 class MicroPythonKernel(Kernel):
     implementation = 'micropython_kernel'
@@ -58,47 +64,80 @@ class MicroPythonKernel(Kernel):
         self.silent = False
         self.workingserial = None
         self.workingserialchunk = None
+        
+    def serialconnect(self, cmdline0spl):
+        if self.workingserial is not None:
+            self.process_output("Closing old serial {}\n".format(str(self.workingserial)))
+            self.workingserial.close() 
+            self.workingserial = None
+        
+        baudrate = 115200
+        if len(cmdline0spl) >= 3:
+            try:
+                baudrate = int(cmdline0spl[2])
+            except ValueError:
+                self.process_output("Bad baud rate setting")
 
+        if len(cmdline0spl) >= 2:
+            portname = cmdline0spl[1]
+        else:
+            possibleports = guessserialport()
+            portname = possibleports[0]  if possibleports else "/dev/ttyUSB0"
+            
+            
+        self.process_output("Connecting to Serial ({}, {})\n".format(portname, baudrate))
+        try:
+            self.workingserial = serial.Serial(portname, baudrate, timeout=serialtimeout)
+        except serial.SerialException as e:
+            self.process_output(e.strerror)
+            possibleports = guessserialport()
+            if possibleports:
+                self.process_output("\nTry one of these ports:\n  {}".format("\n  ".join(possibleports)))
+            else:
+                self.process_output("\nAre you sure your ESP8266 is plugged in?")
+    
     def sendcommand(self, command):
+
+        # extract any %-commands we have here at the start (or ending?)
         cmdlines = command.splitlines(True)
+        for cmdline0 in cmdlines:
+            cmdline0 = cmdline0.strip()
+            if cmdline0:
+                break
+        cmdline0spl1 = cmdline0.split(maxsplit=1)
+        cmdline00 = cmdline0spl1[0]
         
         # Instantiate a connection %%CONN port baudrate
-        if cmdlines[0][:6] == "%%CONN":
-            line = cmdlines[0]
-            bline = line[6:].strip() or "/dev/ttyUSB0 115200"
-            bline = bline.split()
-            if self.workingserial is not None:
-                self.process_output("Closing old serial\n")
-                self.workingserial.close() 
-                self.workingserial = None
-            self.process_output("Connecting to Serial({}, {})\n".format(bline[0], bline[1]))
-            try:
-                self.workingserial = serial.Serial(bline[0], int(bline[1]), timeout=0.5)
-            except serial.SerialException as e:
-                self.process_output(e.strerror)
-
+        if cmdline00 == "%serialconnect":
+            self.serialconnect(cmdline0.split())
             if self.workingserial:
-                self.process_output("Serial connected {}\n".format(str(self.workingserial)))
+                self.process_output("\n ** Serial connected **\n\n")
+                self.process_output(str(self.workingserial))
+                self.process_output("\n")
                 self.enterpastemode()
 
         elif self.workingserial is None:
-            self.process_output("No serial connected; write %%CONN to connect; %lsmagic to list commands")
+            self.process_output("No serial connected\n")
+            self.process_output("  %serialconnect to connect\n")
+            self.process_output("  %lsmagic to list commands")
 
-        elif cmdlines[0][:7] == "%%CHECK":
+        elif cmdline00 == "%writebytes":
+            if len(cmdline0spl1) > 1:
+                nbyteswritten = self.workingserial.write(eval(cmdline0spl1[1]))
+                self.process_output("serial.write {} bytes to {} at baudrate {}".format(nbyteswritten, self.workingserial.port, self.workingserial.baudrate))
+            
+        elif cmdline00 == "%readbytes":
             l = self.workingserial.read_all()
             self.process_output(str([l]))
             
-        elif cmdlines[0][:7] == "%%RECS":
-            self.receivestream(bseekokay=False)
-            
-        elif cmdlines[0][:8] == "%%REBOOT":
+        elif cmdline00 == "%rebootdevice":
             self.workingserial.write(b"\x03\r")  # quit any running program
             self.workingserial.write(b"\x02\r")  # exit the paste mode with ctrl-B
             self.workingserial.write(b"\x04\r")  # soft reboot code
             self.enterpastemode()
 
         # copy cell contents into a file on the device (by hackily saving it)
-        elif cmdlines[0][:6] == "%%FILE":
+        elif cmdline00 == "%%FILE":
             for i, line in enumerate(cmdlines):
                 if i == 0:
                     fname = cmdlines[0].split()[1]
@@ -120,17 +159,18 @@ class MicroPythonKernel(Kernel):
             self.process_output("{} lines sent done".format(len(cmdlines)-1))
 
 
-        elif cmdlines[0].strip() == "%lsmagic":
-            self.process_output("%%CONN /dev/ttyUSB0 115200\n")
-            self.process_output("%%CHECK does serial.read_all()\n")
-            self.process_output("%%RECS does interpret stream normally\n")
-            self.process_output("%%NOREC at start suppresses receivestream\n")
-            self.process_output("%%REBOOT reboots device\n")
+        elif cmdline00 == "%lsmagic":
+            self.process_output("%serialconnect [/dev/ttyUSB0] [115200]\n")
+            self.process_output("%suppressendcode doesn't send x04 or wait to read after sending the cell\n")
+            self.process_output("  (assists for debugging using %writebytes and %readbytes)\n")
+            self.process_output("%writebutes does serial.write() on a string b'binary_stuff' \n")
+            self.process_output("%readbytes does serial.read_all()\n")
+            self.process_output("%rebootdevice reboots device\n")
             self.process_output("%%FILE name.py uploads subsequent text to file\n")
 
         # run the cell contents as normal
         else:
-            bsuppressreceivestream = (cmdlines[0][:7] == "%%NOREC")
+            bsuppressreceivestream = (cmdline00 == "%suppressendcode")
             if bsuppressreceivestream:
                 cmdlines = cmdlines[1:]
 
@@ -169,7 +209,7 @@ class MicroPythonKernel(Kernel):
         self.workingserial.write(b'1\x04')         # single character program to run so receivestream works
         self.receivestream(bseekokay=True, bwarnokaypriors=False)
 
-    def receivestream(self, bseekokay, bwarnokaypriors=True):
+    def receivestream(self, bseekokay, bwarnokaypriors=True, b5secondtimeout=False):
         n04count = 0
         brebootdetected = False
         for j in range(2):  # for restarting the chunking when interrupted
@@ -179,51 +219,63 @@ class MicroPythonKernel(Kernel):
             indexprevgreaterthansign = -1
             for i, rline in enumerate(self.workingserialchunk):
                 assert rline is not None
+                
+                # warning message when we are waiting on an OK
+                if bseekokay and bwarnokaypriors and (rline != b'OK') and (rline != b'>') and rline.strip():
+                    self.process_output("\n[missing-OK]")
+ 
+                # the main interpreting loop
                 if rline == b'OK' and bseekokay:
                     if i != 0 and bwarnokaypriors:
                         self.process_output("\n\n[Late OK]\n\n")
                     bseekokay = False
-                    continue
-                    
-                elif bseekokay and bwarnokaypriors:
-                    if (rline != b'>') and rline.strip():
-                        self.process_output("\n[missing-OK]")
-                    
-                # leaving condition where OK...x04...x04...> has been found
-                if n04count >= 2 and rline == b'>' and not bseekokay:
+
+                # one of 2 Ctrl-Ds in the return from execute in paste mode
+                elif rline == b'\x04':
+                    n04count += 1
+
+                # leaving condition where OK...x04...x04...> has been found in paste mode
+                elif rline == b'>' and n04count >= 2 and not bseekokay:
                     if n04count != 2:
                         self.process_output("[too many x04s %d]" % n04count)
                     break
 
-                if rline == b'\x04':
-                    n04count += 1
-                    continue
+                elif rline == b'':
+                    if b5secondtimeout:
+                        self.process_output("[Timed out waiting for recognizable response]\n")
+                        break
+                    self.process_output(".")  # dot holding position to prove it's alive
 
-                if rline == b'Type "help()" for more information.\r\n':
+                elif rline == b'Type "help()" for more information.\r\n':
                     brebootdetected = True
-                if rline == b'>':
+                    self.process_output(rline.decode("utf8"))
+                    
+                elif rline == b'>':
                     indexprevgreaterthansign = i
+                    self.process_output('>')
                     
                 # looks for ">>> "
-                if brebootdetected and rline == b' ' and indexprevgreaterthansign == i-1: 
+                elif rline == b' ' and brebootdetected and indexprevgreaterthansign == i-1: 
                     self.process_output("[reboot detected %d]" % n04count)
-                    self.enterpastemode()  # unintentionally recursive, this
+                    self.enterpastemode()  # this is unintentionally recursive, but after a reboot has been seen we need to get into paste mode
+                    self.process_output(' ')
                     break
                     
-                #if bseekokay and not bwarnokaypriors and (rline == b'>' or not rline.strip()):
-                #    continue
-                    
-                try:
-                    ur = rline.decode("utf8")
-                except UnicodeDecodeError:
-                    ur = str(rline)
-                self.process_output(ur)
-                
-            else:   # we've hit a stop iteration, happens with Keyboard interrupt, and generator needs to be rebuilt
+                # normal processing of the string of bytes that have come in
+                else:
+                    try:
+                        ur = rline.decode("utf8")
+                    except UnicodeDecodeError:
+                        ur = str(rline)
+                    self.process_output(ur)
+        
+            # else on the for-loop, means the generator has ended at a stop iteration
+            # this happens with Keyboard interrupt, and generator needs to be rebuilt
+            else:  # of the for-command 
                 self.workingserialchunk = None
                 continue
                     
-            break   # out of the while loop
+            break   # out of the for loop
 
     def process_output(self, output):
         if not self.silent:
@@ -247,12 +299,11 @@ class MicroPythonKernel(Kernel):
         #    self.startasyncmodule()
 
         if interrupted:
-            logger.info("Sending %%C")
             self.process_output("\n\n*** Sending x03\n\n")
             if self.workingserial:
                 self.workingserial.write(b'\r\x03')
                 interrupted = True
-                self.receivestream(bseekokay=False)
+                self.receivestream(bseekokay=False, b5secondtimeout=True)
             return {'status': 'abort', 'execution_count': self.execution_count}
 
 
