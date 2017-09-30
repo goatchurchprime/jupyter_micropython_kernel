@@ -1,11 +1,15 @@
 from ipykernel.kernelbase import Kernel
 import logging, sys, serial, time, os
+import serial.tools.list_ports
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 serialtimeout = 0.5
 serialtimeoutcount = 10
+
+# use argparse for the commands here
+# import argparse
 
 # merge uncoming serial stream and break at OK, \x04, >, \r\n, and long delays 
 def yieldserialchunk(s):
@@ -46,7 +50,7 @@ def yieldserialchunk(s):
 
 # this should take account of the operating system
 def guessserialport():  
-    return sorted([ os.path.join("/dev/", k)  for k in os.listdir("/dev/")  if k[:6] == "ttyUSB" ])
+    return sorted([x[0]  for x in serial.tools.list_ports.grep("")])
 
 class MicroPythonKernel(Kernel):
     implementation = 'micropython_kernel'
@@ -82,7 +86,7 @@ class MicroPythonKernel(Kernel):
             portname = cmdline0spl[1]
         else:
             possibleports = guessserialport()
-            portname = possibleports[0]  if possibleports else "/dev/ttyUSB0"
+            portname = possibleports[0] if possibleports  else ("COM4" if sys.platform == "win32" else "/dev/ttyUSB0")
             
             
         self.process_output("Connecting to Serial ({}, {})\n".format(portname, baudrate))
@@ -116,6 +120,12 @@ class MicroPythonKernel(Kernel):
                 self.process_output("\n")
                 self.enterpastemode()
 
+        elif cmdline00 == "%disconnect":
+            if self.workingserial is not None:
+                self.process_output("Closing serial {}\n".format(str(self.workingserial)))
+                self.workingserial.close() 
+                self.workingserial = None
+
         elif self.workingserial is None:
             self.process_output("No serial connected\n")
             self.process_output("  %serialconnect to connect\n")
@@ -135,8 +145,14 @@ class MicroPythonKernel(Kernel):
             self.workingserial.write(b"\x02\r")  # exit the paste mode with ctrl-B
             self.workingserial.write(b"\x04\r")  # soft reboot code
             self.enterpastemode()
+            
+        elif cmdline00 == "%reboot":
+            self.process_output("Did you mean %rebootdevice?\n")
 
-        # copy cell contents into a file on the device (by hackily saving it)
+        elif cmdline00 in ("%savetofile", "%savefile", "%sendfile"):
+            self.process_output("Did you mean to write %sendtofile?\n")
+            
+        # copy cell contents into a file on the device (by hackily sending it)
         elif cmdline00 == "%sendtofile":
             cmdattr = cmdline0.split()[1:]
             bsendasbinary = False
@@ -180,6 +196,7 @@ class MicroPythonKernel(Kernel):
             self.process_output("%writebytes does serial.write() on a string b'binary_stuff' \n")
             self.process_output("%readbytes does serial.read_all()\n")
             self.process_output("%rebootdevice reboots device\n")
+            self.process_output("%disconnects disconnects serial\n")
             self.process_output("%sendtofile name.py uploads subsequent text to file\n")
 
         # run the cell contents as normal

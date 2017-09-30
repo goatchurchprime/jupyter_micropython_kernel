@@ -8,13 +8,16 @@ from IPython.utils.tempdir import TemporaryDirectory
 
 # copied out from https://github.com/takluyver/bash_kernel/blob/master/bash_kernel/install.py
 
-kernel_json = { "argv": ["python3","-m", "jupyter_micropython_kernel", "-f", "{connection_file}"],
+# sys.executable should be "python3"
+kernel_json = { "argv": [sys.executable, "-m", "jupyter_micropython_kernel", "-f", "{connection_file}"],
  "display_name": "MicroPython through serial",
  "language": "micropython"
 }
 
 
 def install_my_kernel_spec(user=True, prefix=None):
+    if "python2" in sys.executable:
+        print("I think this needs python3")
     with TemporaryDirectory() as td:
         os.chmod(td, 0o755) # Starts off as 700, not user readable
         with open(os.path.join(td, 'kernel.json'), 'w') as f:
@@ -32,7 +35,7 @@ def _is_root():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description='Install KernelSpec for Bash Kernel'
+        description='Install KernelSpec for MicroPython Kernel'
     )
     prefix_locations = parser.add_mutually_exclusive_group()
 
