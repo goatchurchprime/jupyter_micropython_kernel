@@ -10,7 +10,7 @@ from IPython.utils.tempdir import TemporaryDirectory
 
 # sys.executable should be "python3"
 kernel_json = { "argv": [sys.executable, "-m", "jupyter_micropython_kernel", "-f", "{connection_file}"],
- "display_name": "MicroPython through serial",
+ "display_name": "MicroPython - USB",
  "language": "micropython"
 }
 
@@ -24,8 +24,13 @@ def install_my_kernel_spec(user=True, prefix=None):
             json.dump(kernel_json, f, sort_keys=True)
         # TODO: Copy resources once they're specified
 
-        print('Installing IPython kernel spec (micropython')
-        KernelSpecManager().install_kernel_spec(td, 'Micropython', user=user, replace=True, prefix=prefix)
+        print('Installing IPython kernel spec of micropython')
+        k = KernelSpecManager()
+        k.install_kernel_spec(td, 'Micropython', user=user, replace=True, prefix=prefix)
+        
+        h = k.get_kernel_spec("micropython")
+        print("...into", h.resource_dir)
+        
 
 def _is_root():
     try:

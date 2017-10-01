@@ -1,8 +1,21 @@
 # Jupyter MicroPython Kernel
 
-Jupyter kernel to interact with a MicroPython or CircuitPython board over its serial REPL.  
-Note this is _highly_ experimental and still alpha/beta quality.  
-Try it out but don't be surprised if it behaves in odd or unexpected ways!
+Jupyter kernel to interact with a MicroPython ESP8266 or ESP32 over its serial REPL.  
+
+## Background
+
+This had been proposed as for an enhancement to webrepl with the idea of a jupyter-like 
+interface to webrepl rather than the faithful emulation of a command line: https://github.com/micropython/webrepl/issues/32
+
+Other known projects that have implemented a Jupyter Micropython kernel are:
+* https://github.com/adafruit/jupyter_micropython_kernel
+* https://github.com/willingc/circuitpython_kernel
+* https://github.com/TDAbboud/mpkernel
+* https://github.com/takluyver/ubit_kernel
+
+In my defence, this is not an effect of not-invented-here syndrome; I did not discover most of them until I 
+had mostly written this one.  But for my purposes, this is more robust and contains debugging (of the 
+serial connections) capability.
 
 ## Installation
 
@@ -12,14 +25,14 @@ Then clone this repository to a directory.
 
 Install this library (in editable mode) into Python3
 
-    pip3 install -e jupyter_micropython_kernel
+    pip install -e jupyter_micropython_kernel
 
 (This creates a small file pointing to this directory in the python/../site-packages 
 directory, and makes it possible to "git update" the library later as it gets improved)
     
 Install the kernel into jupyter itself    
 
-    python3 -m jupyter_micropython_kernel.install
+    python -m jupyter_micropython_kernel.install
 
 (This creates the small file ".local/share/jupyter/kernels/micropython/kernel.json" 
 that jupyter uses to reference it's kernels
@@ -40,7 +53,7 @@ MicroPython kernel display name listed.
 
 The first cell will need to be something like:
 
-    %%CONN /dev/ttyUSB0 115200
+    %serialconnect
     
 or something that matches the serial port and baudrate that 
 you connect to your MicroPython/ESP8266 with.
@@ -52,18 +65,18 @@ by running the cells.
 look at with some of the features shown.)
 
 If a cell is taking too long to interrupt, it may respond 
-to a "Kernel" -> "Interrupt" command. s
+to a "Kernel" -> "Interrupt" command. 
 
-To upload the contents of a cell to a file, put 
+Alternatively hit Escape and then 'i' twice.
 
-    %%FILE yourfilename.py 
+To upload the contents of a cell to a file, write: 
+    %sendtofile yourfilename.py 
     
 as the first line of the cell
 
 To do a soft reboot (when you need to clear out the modules 
 and recover some memory) type:
-
-    %%REBOOT
+    %reboot
 
 Note: Restarting the kernel does not actually reboot the device.  
 Also, pressing the reset button will probably mess things up, because 
@@ -72,23 +85,22 @@ this interface relies on the ctrl-A non-echoing paste mode to do its stuff.
 
 ## Debugging
 
-The system works by spawning off a new python executable that manages the 
-interface to the serial line and accepts input-output through its stdin and
-stdout.  
+The system works by finding and connecting to a serial line and
+then issuing the enter paste mode command Ctrl-A (hex 0x01)
 
-You can interact with this module directly by typing
+In this mode blocks of to-be-executed text are ended with a Ctrl-D
+(hex 0x04).
 
-    python -m jupyter_micropython_kernel.asyncmodule.py
+The response that comes back begins with an "OK" followed by the 
+actual program response, followed by Ctrl-D, followed by any 
+error messages, followed by a second Ctrl-D, followed by a '>'.
 
-It uses a prompt that looks like "[serPROMPT>"
-
-You can type the same command "%%CONN ..." to make a connection.
-
-When you are entering lines of code, the final line needs to be:
-
-  %%D
-  
-To make the MicroPython device start executing the code that has been 
-pasted.  While it is running, %%C will send it a ctrl-C keyboard 
-interrupt.
+You can implement this interface (for debugging purposes) to find out 
+how it's snarling up beginning with:
+ "%serialconnect --raw"
+and then doing
+ %writebytes -b "sometext"
+and 
+ %readbytes
+ 
 

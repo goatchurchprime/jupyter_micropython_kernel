@@ -1,5 +1,5 @@
 from ipykernel.kernelbase import Kernel
-import logging, sys, serial, time, os
+import logging, sys, serial, time, os, re
 import serial.tools.list_ports
 
 logger = logging.getLogger(__name__)
@@ -8,8 +8,29 @@ logger.setLevel(logging.INFO)
 serialtimeout = 0.5
 serialtimeoutcount = 10
 
+# use of argparse for handling the %commands in the cells
+import argparse, shlex
+ap_serialconnect = argparse.ArgumentParser(prog="%serialconnect", add_help=False)
+ap_serialconnect.add_argument('--raw', help='Just open connection', action='store_true')
+ap_serialconnect.add_argument('portname', type=str, default=0, nargs="?")
+ap_serialconnect.add_argument('baudrate', type=int, default=115200, nargs="?")
+def parseap(ap, percentstringargs1):
+    try:
+        return ap.parse_known_args(percentstringargs1)[0]
+    except SystemExit:
+        return None  # should be a default one
+        
 # use argparse for the commands here
-# import argparse
+#    import argparse
+#       and change name of process_output() to sres() for string_response()
+# move %lsmagic to top of commands list
+# find out how sometimes things get printed in green
+#    colour change to green is done by the character \x1b
+#    don't know how to change back to black or to the yellow colour  (these are the syntax highlighting colours)
+# [prior stuff] could decode and print by line
+# insert comment reminding you to run "python -m jupyter_micropython_kernel.install"
+#    after this pip install
+# %serialconnect to have mode not to enter into Ctrl-A or do anything
 
 # merge uncoming serial stream and break at OK, \x04, >, \r\n, and long delays 
 def yieldserialchunk(s):
@@ -19,8 +40,11 @@ def yieldserialchunk(s):
         try:
             b = s.read()
         except serial.SerialException as e:
-            yield str(e).encode("utf8")
+            yield b"\r\n**"
             yield str(type(e)).encode("utf8")
+            yield b"\r\n**"
+            yield str(e).encode("utf8")
+            yield b"\r\n\r\n"
             break
             
         if not b:
@@ -69,40 +93,62 @@ class MicroPythonKernel(Kernel):
         self.workingserial = None
         self.workingserialchunk = None
         
-    def serialconnect(self, cmdline0spl):
+    def serialconnect(self, portname, baudrate):
         if self.workingserial is not None:
             self.process_output("Closing old serial {}\n".format(str(self.workingserial)))
-            self.workingserial.close() 
+            self.workingserial.close()
             self.workingserial = None
-        
-        baudrate = 115200
-        if len(cmdline0spl) >= 3:
-            try:
-                baudrate = int(cmdline0spl[2])
-            except ValueError:
-                self.process_output("Bad baud rate setting")
 
-        if len(cmdline0spl) >= 2:
-            portname = cmdline0spl[1]
-        else:
+        if type(portname) is int:
             possibleports = guessserialport()
-            portname = possibleports[0] if possibleports  else ("COM4" if sys.platform == "win32" else "/dev/ttyUSB0")
-            
+            if possibleports:
+                portname = possibleports[portname]
+                if len(possibleports) > 1:
+                    self.process_output("Found serial ports {}: \n".format(", ".join(possibleports)))
+            else:
+                self.process_output("No possible ports found")
+                portname = ("COM4" if sys.platform == "win32" else "/dev/ttyUSB0")
             
         self.process_output("Connecting to Serial ({}, {})\n".format(portname, baudrate))
         try:
             self.workingserial = serial.Serial(portname, baudrate, timeout=serialtimeout)
         except serial.SerialException as e:
             self.process_output(e.strerror)
+            self.process_output("\n")
             possibleports = guessserialport()
             if possibleports:
                 self.process_output("\nTry one of these ports:\n  {}".format("\n  ".join(possibleports)))
             else:
-                self.process_output("\nAre you sure your ESP8266 is plugged in?")
+                self.process_output("\nAre you sure your ESP-device is plugged in?")
     
-    def sendcommand(self, command):
+    def interpretpercentline(self, percentline, cellcontents):
+        percentstringargs = shlex.split(percentline)
+        percentcommand = percentstringargs[0]
 
+        if percentcommand == ap_serialconnect.prog:
+            apargs = parseap(ap_serialconnect, percentstringargs[1:])
+            self.serialconnect(apargs.portname, apargs.baudrate)
+            if self.workingserial:
+                self.process_output("\n ** Serial connected **\n\n")
+                self.process_output(str(self.workingserial))
+                self.process_output("\n")
+                time.sleep(0.5)   # give it a moment
+                if not apargs.raw:
+                    self.enterpastemode()
+            return ""
+        return cellcontents
+        
+    def runnormalcell(command):
+        pass
+        
+    def sendcommand(self, cellcontents):
         # extract any %-commands we have here at the start (or ending?)
+        mpercentline = re.match("\s*(%.*)", cellcontents)
+        if mpercentline:
+            cellcontents = self.interpretpercentline(mpercentline.group(1), cellcontents)
+            
+        
+        command = cellcontents
         cmdlines = command.splitlines(True)
         for cmdline0 in cmdlines:
             cmdline0 = cmdline0.strip()
@@ -118,6 +164,7 @@ class MicroPythonKernel(Kernel):
                 self.process_output("\n ** Serial connected **\n\n")
                 self.process_output(str(self.workingserial))
                 self.process_output("\n")
+                time.sleep(0.5)   # give it a moment
                 self.enterpastemode()
 
         elif cmdline00 == "%disconnect":
@@ -190,7 +237,7 @@ class MicroPythonKernel(Kernel):
 
 
         elif cmdline00 == "%lsmagic":
-            self.process_output("%serialconnect [/dev/ttyUSB0] [115200]\n")
+            self.process_output(ap_serialconnect.format_usage())
             self.process_output("%suppressendcode doesn't send x04 or wait to read after sending the cell\n")
             self.process_output("  (assists for debugging using %writebytes and %readbytes)\n")
             self.process_output("%writebytes does serial.write() on a string b'binary_stuff' \n")
@@ -318,19 +365,33 @@ class MicroPythonKernel(Kernel):
         if not code.strip():
             return {'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {}}
 
+        if self.workingserial:
+            try:
+                priorbuffer = self.workingserial.read_all()
+            except OSError as e:
+                priorbuffer = []
+                self.process_output("\n\n***Connecton broken [%s]\n" % str(e.strerror))
+                self.process_output("You may need to reconnect")
+                
+            if priorbuffer:
+                for pbline in priorbuffer.splitlines():
+                    self.process_output('[leftinbuffer] ')
+                    self.process_output(pbline.decode("utf8"))
+                    self.process_output('\n')
+
         interrupted = False
         try:
             self.sendcommand(code)
         except KeyboardInterrupt:
             interrupted = True
         except OSError as e:
-            self.process_output("\n\n*** [%s]\n\n" % str(e.strerror))
+            self.process_output("\n\n***OSError [%s]\n\n" % str(e.strerror))
         #except pexpect.EOF:
         #    self.process_output(self.asyncmodule.before + 'Restarting Bash')
         #    self.startasyncmodule()
 
         if interrupted:
-            self.process_output("\n\n*** Sending x03\n\n")
+            self.process_output("\n\n*** Sending Ctrl-C\n\n")
             if self.workingserial:
                 self.workingserial.write(b'\r\x03')
                 interrupted = True
