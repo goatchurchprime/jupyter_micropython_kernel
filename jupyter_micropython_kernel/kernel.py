@@ -1,6 +1,6 @@
 from ipykernel.kernelbase import Kernel
-import logging, sys, serial, time, os, re
-import serial.tools.list_ports
+import logging, sys, time, os, re
+import serial, socket, serial.tools.list_ports
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -10,27 +10,42 @@ serialtimeoutcount = 10
 
 # use of argparse for handling the %commands in the cells
 import argparse, shlex
+
 ap_serialconnect = argparse.ArgumentParser(prog="%serialconnect", add_help=False)
 ap_serialconnect.add_argument('--raw', help='Just open connection', action='store_true')
 ap_serialconnect.add_argument('portname', type=str, default=0, nargs="?")
 ap_serialconnect.add_argument('baudrate', type=int, default=115200, nargs="?")
+
+ap_socketconnect = argparse.ArgumentParser(prog="%socketconnect", add_help=False)
+ap_socketconnect.add_argument('--raw', help='Just open connection', action='store_true')
+ap_socketconnect.add_argument('ipnumber', type=str)
+ap_socketconnect.add_argument('portnumber', type=int)
+
+ap_writebytes = argparse.ArgumentParser(prog="%writebytes", add_help=False)
+ap_writebytes.add_argument('-b', help='binary', action='store_true')
+ap_writebytes.add_argument('stringtosend', type=str)
+
+ap_sendtofile = argparse.ArgumentParser(prog="%sendtofile", add_help=False)
+ap_sendtofile.add_argument('destinationfilename', type=str)
+
 def parseap(ap, percentstringargs1):
     try:
         return ap.parse_known_args(percentstringargs1)[0]
-    except SystemExit:
+    except SystemExit:  # argparse throws these because it assumes you only want to do the command line
         return None  # should be a default one
         
-# use argparse for the commands here
-#    import argparse
-#       and change name of process_output() to sres() for string_response()
-# move %lsmagic to top of commands list
+# change name of process_output() to sres() for string_response()
 # find out how sometimes things get printed in green
 #    colour change to green is done by the character \x1b
 #    don't know how to change back to black or to the yellow colour  (these are the syntax highlighting colours)
-# [prior stuff] could decode and print by line
 # insert comment reminding you to run "python -m jupyter_micropython_kernel.install"
 #    after this pip install
-# %serialconnect to have mode not to enter into Ctrl-A or do anything
+# %readbytes now looks redundant
+# record incoming bytes (eg when in enterpastemode) that haven't been printed 
+#    and print them when there is Ctrl-C
+# micropython_notebooks -> developer_micropython_notebooks
+# improve the help in usage argparses
+# capability to suppress "I (200055) wifi:" messages
 
 # merge uncoming serial stream and break at OK, \x04, >, \r\n, and long delays 
 def yieldserialchunk(s):
@@ -109,7 +124,7 @@ class MicroPythonKernel(Kernel):
                 self.process_output("No possible ports found")
                 portname = ("COM4" if sys.platform == "win32" else "/dev/ttyUSB0")
             
-        self.process_output("Connecting to Serial ({}, {})\n".format(portname, baudrate))
+        self.process_output("Connecting to Serial {} baud={}\n".format(portname, baudrate))
         try:
             self.workingserial = serial.Serial(portname, baudrate, timeout=serialtimeout)
         except serial.SerialException as e:
@@ -120,6 +135,41 @@ class MicroPythonKernel(Kernel):
                 self.process_output("\nTry one of these ports:\n  {}".format("\n  ".join(possibleports)))
             else:
                 self.process_output("\nAre you sure your ESP-device is plugged in?")
+
+    def socketconnect(self, ipnumber, portnumber):
+        if self.workingserial is not None:
+            self.process_output("Closing old serial {}\n".format(str(self.workingserial)))
+            self.workingserial.close()
+            self.workingserial = None
+
+        s = socket.socket()
+        self.process_output("Connecting to socket ({} {})\n".format(ipnumber, portnumber))
+        try:
+            s.connect(socket.getaddrinfo(ipnumber, portnumber)[0][-1])
+            self.workingserial = s.makefile('rwb', 0)
+        except OSError as e:
+            self.process_output("Socket connect error {}".format(str(e)))
+        except ConnectionRefusedError as e:
+            self.process_output("Socket connect error {}".format(str(e)))
+
+
+    def sendtofile(self, destinationfilename, cellcontents):
+        for i, line in enumerate(cellcontents.splitlines(True)):
+            if i == 0:
+                self.workingserial.write("O=open({}, 'w')\r\n".format(repr(destinationfilename)).encode())
+                continue
+                
+            self.workingserial.write("O.write({})\r\n".format(repr(line)).encode())
+            if (i%10) == 0:
+                self.workingserial.write(b'\r\x04')
+                self.receivestream(bseekokay=True)
+                self.process_output("{} lines sent so far\n".format(i))
+
+        self.workingserial.write("O.close()\r\n".encode())
+        self.workingserial.write(b'\r\x04')
+        self.receivestream(bseekokay=True)
+        self.process_output("{} lines sent done".format(len(cmdlines)-1))
+
     
     def interpretpercentline(self, percentline, cellcontents):
         percentstringargs = shlex.split(percentline)
@@ -135,145 +185,124 @@ class MicroPythonKernel(Kernel):
                 time.sleep(0.5)   # give it a moment
                 if not apargs.raw:
                     self.enterpastemode()
-            return ""
-        return cellcontents
-        
-    def runnormalcell(command):
-        pass
-        
-    def sendcommand(self, cellcontents):
-        # extract any %-commands we have here at the start (or ending?)
-        mpercentline = re.match("\s*(%.*)", cellcontents)
-        if mpercentline:
-            cellcontents = self.interpretpercentline(mpercentline.group(1), cellcontents)
-            
-        
-        command = cellcontents
-        cmdlines = command.splitlines(True)
-        for cmdline0 in cmdlines:
-            cmdline0 = cmdline0.strip()
-            if cmdline0:
-                break
-        cmdline0spl1 = cmdline0.split(maxsplit=1)
-        cmdline00 = cmdline0spl1[0]
-        
-        # Instantiate a connection %%CONN port baudrate
-        if cmdline00 == "%serialconnect":
-            self.serialconnect(cmdline0.split())
+            return None
+
+        if percentcommand == ap_socketconnect.prog:
+            apargs = parseap(ap_serialconnect, percentstringargs[1:])
+            self.socketconnect(apargs.ipnumber, apargs.portnumber)
             if self.workingserial:
-                self.process_output("\n ** Serial connected **\n\n")
+                self.process_output("\n ** Socket connected **\n\n")
                 self.process_output(str(self.workingserial))
                 self.process_output("\n")
-                time.sleep(0.5)   # give it a moment
-                self.enterpastemode()
+                #if not apargs.raw:
+                #    self.enterpastemode()
+            return None
 
-        elif cmdline00 == "%disconnect":
+        if percentcommand == "%lsmagic":
+            self.process_output(ap_serialconnect.format_usage())
+            self.process_output("%lsmagic list magic commands\n")
+            self.process_output("%suppressendcode doesn't send x04 or wait to read after sending the cell\n")
+            self.process_output("  (assists for debugging using %writebytes and %readbytes)\n")
+            self.process_output("%writebytes does serial.write() on a string b'binary_stuff' \n")
+            self.process_output(ap_writebytes.format_usage())
+            self.process_output("%readbytes does serial.read_all()\n")
+            self.process_output("%rebootdevice reboots device\n")
+            self.process_output("%disconnects disconnects serial\n")
+            self.process_output(ap_sendtofile.format_usage())
+            self.process_output(ap_socketconnect.format_usage())
+            self.process_output("%sendtofile name.py uploads subsequent text to file\n")
+            return None
+
+        if percentcommand == "%disconnect":
             if self.workingserial is not None:
                 self.process_output("Closing serial {}\n".format(str(self.workingserial)))
                 self.workingserial.close() 
                 self.workingserial = None
-
-        elif self.workingserial is None:
-            self.process_output("No serial connected\n")
-            self.process_output("  %serialconnect to connect\n")
-            self.process_output("  %lsmagic to list commands")
-
-        elif cmdline00 == "%writebytes":
-            if len(cmdline0spl1) > 1:
-                nbyteswritten = self.workingserial.write(eval(cmdline0spl1[1]))
-                self.process_output("serial.write {} bytes to {} at baudrate {}".format(nbyteswritten, self.workingserial.port, self.workingserial.baudrate))
+            return None
+        
+        # remaining commands require a connection
+        if self.workingserial is None:
+            return cellcontents
             
-        elif cmdline00 == "%readbytes":
+        if percentcommand == ap_writebytes.prog:
+            apargs = parseap(ap_writebytes, percentstringargs[1:])
+            bytestosend = apargs.stringtosend.encode().decode("unicode_escape").encode()
+            nbyteswritten = self.workingserial.write(bytestosend)
+            self.process_output("serial.write {} bytes to {} at baudrate {}".format(nbyteswritten, self.workingserial.port, self.workingserial.baudrate))
+            return None
+            
+        if percentcommand == "%readbytes":
             l = self.workingserial.read_all()
             self.process_output(str([l]))
+            return None
             
-        elif cmdline00 == "%rebootdevice":
+        if percentcommand == "%rebootdevice":
             self.workingserial.write(b"\x03\r")  # quit any running program
             self.workingserial.write(b"\x02\r")  # exit the paste mode with ctrl-B
             self.workingserial.write(b"\x04\r")  # soft reboot code
             self.enterpastemode()
+            return None
             
-        elif cmdline00 == "%reboot":
+        if percentcommand == "%reboot":
             self.process_output("Did you mean %rebootdevice?\n")
+            return None
 
-        elif cmdline00 in ("%savetofile", "%savefile", "%sendfile"):
+        if percentcommand in ("%savetofile", "%savefile", "%sendfile"):
             self.process_output("Did you mean to write %sendtofile?\n")
+            return None
+
+        if percentcommand == ap_sendtofile.prog:
+            apargs = parseap(ap_sendtofile, percentstringargs[1:])
+            cellcontents = re.sub("^\s*%sendtofile.*\n(?:[ \r]*\n)?", "", cellcontents)
+            sendtofile(apargs.destinationfilename, cellcontents)
+            return None
+
+        return cellcontents
+        
+    def runnormalcell(self, cellcontents, bsuppressendcode):
+        cmdlines = cellcontents.splitlines(True)
+        r = self.workingserial.read_all()
+        if r:
+            self.process_output('[priorstuff] ')
+            self.process_output(str(r))
             
-        # copy cell contents into a file on the device (by hackily sending it)
-        elif cmdline00 == "%sendtofile":
-            cmdattr = cmdline0.split()[1:]
-            bsendasbinary = False
-            fsource = None
-            fname = "uploadfile"
-
-            # need to parse string with quotes (maybe use the settings command line thing to parse)
-            if len(cmdattr) >= 1 and cmdattr[0] == '-b':
-                bsendasbinary = True
-                del cmdattr[0]
-            if len(cmdattr) >= 2 and cmdattr[0] == '-src':
-                fsource = cmdattr[1]
-                del cmdattr[:2]
-            if len(cmdattr) >= 1:
-                fname = cmdattr[0]
-
-            for i, line in enumerate(cmdlines):
-                if i == 0:
-                    self.workingserial.write("O=open({}, 'w')\r\n".format(repr(fname)).encode("utf8"))
-                    continue
+        for line in cmdlines:
+            if line:
+                if line[-2:] == '\r\n':
+                    line = line[:-2]
+                elif line[-1] == '\n':
+                    line = line[:-1]
+                self.workingserial.write(line.encode("utf8"))
+                self.workingserial.write(b'\r\n')
+                r = self.workingserial.read_all()
+                if r:
+                    self.process_output('[duringwriting] ')
+                    self.process_output(str(r))
                     
-                if i == 1 and not line.strip():
-                    continue   # skip first blank line
-                    
-                self.workingserial.write("O.write({})\r\n".format(repr(line)).encode("utf8"))
-                if (i%10) == 0:
-                    self.workingserial.write(b'\r\x04')
-                    self.receivestream(bseekokay=True)
-                    self.process_output("{} lines sent so far\n".format(i))
-
-            self.workingserial.write("O.close()\r\n".encode("utf8"))
+        if not bsuppressendcode:
             self.workingserial.write(b'\r\x04')
             self.receivestream(bseekokay=True)
-            self.process_output("{} lines sent done".format(len(cmdlines)-1))
-
-
-        elif cmdline00 == "%lsmagic":
-            self.process_output(ap_serialconnect.format_usage())
-            self.process_output("%suppressendcode doesn't send x04 or wait to read after sending the cell\n")
-            self.process_output("  (assists for debugging using %writebytes and %readbytes)\n")
-            self.process_output("%writebytes does serial.write() on a string b'binary_stuff' \n")
-            self.process_output("%readbytes does serial.read_all()\n")
-            self.process_output("%rebootdevice reboots device\n")
-            self.process_output("%disconnects disconnects serial\n")
-            self.process_output("%sendtofile name.py uploads subsequent text to file\n")
-
-        # run the cell contents as normal
-        else:
-            bsuppressreceivestream = (cmdline00 == "%suppressendcode")
-            if bsuppressreceivestream:
-                cmdlines = cmdlines[1:]
-
-            r = self.workingserial.read_all()
-            if r:
-                self.process_output('[priorstuff] ')
-                self.process_output(str(r))
+        
+    def sendcommand(self, cellcontents):
+        bsuppressendcode = False  # can't yet see how to get this signal through
+        
+        # extract any %-commands we have here at the start (or ending?)
+        mpercentline = re.match("\s*(%.*)", cellcontents)
+        if mpercentline:
+            cellcontents = self.interpretpercentline(mpercentline.group(1), cellcontents)
+            if cellcontents is None:
+                return
                 
-            for line in cmdlines:
-                if line:
-                    if line[-2:] == '\r\n':
-                        line = line[:-2]
-                    elif line[-1] == '\n':
-                        line = line[:-1]
-                    self.workingserial.write(line.encode("utf8"))
-                    self.workingserial.write(b'\r\n')
-                    r = self.workingserial.read_all()
-                    if r:
-                        self.process_output('[duringwriting] ')
-                        self.process_output(str(r))
-                        
-            self.workingserial.write(b'\r\x04')
-            if not bsuppressreceivestream:
-                self.receivestream(bseekokay=True)
-
+        if self.workingserial is None:
+            self.process_output("No serial connected\n")
+            self.process_output("  %serialconnect to connect\n")
+            self.process_output("  %lsmagic to list commands")
+            return
+            
+        # run the cell contents as normal
+        if cellcontents:
+            self.runnormalcell(cellcontents, bsuppressendcode)
+            
     def enterpastemode(self):
         assert self.workingserial
         # now sort out connection situation
@@ -326,7 +355,7 @@ class MicroPythonKernel(Kernel):
 
                 elif rline == b'Type "help()" for more information.\r\n':
                     brebootdetected = True
-                    self.process_output(rline.decode("utf8"))
+                    self.process_output(rline.decode())
                     
                 elif rline == b'>':
                     indexprevgreaterthansign = i
@@ -342,7 +371,7 @@ class MicroPythonKernel(Kernel):
                 # normal processing of the string of bytes that have come in
                 else:
                     try:
-                        ur = rline.decode("utf8")
+                        ur = rline.decode()
                     except UnicodeDecodeError:
                         ur = str(rline)
                     self.process_output(ur)
@@ -375,8 +404,12 @@ class MicroPythonKernel(Kernel):
                 
             if priorbuffer:
                 for pbline in priorbuffer.splitlines():
+                    try:
+                        ur = pbline.decode()
+                    except UnicodeDecodeError:
+                        ur = str(pbline)
                     self.process_output('[leftinbuffer] ')
-                    self.process_output(pbline.decode("utf8"))
+                    self.process_output(ur)
                     self.process_output('\n')
 
         interrupted = False
@@ -397,7 +430,6 @@ class MicroPythonKernel(Kernel):
                 interrupted = True
                 self.receivestream(bseekokay=False, b5secondtimeout=True)
             return {'status': 'abort', 'execution_count': self.execution_count}
-
 
         # everything already gone out with send_response(), but could detect errors (text between the two \x04s
         return {'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {}}
