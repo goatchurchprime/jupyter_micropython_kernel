@@ -53,11 +53,12 @@ def parseap(ap, percentstringargs1):
 # * insert comment reminding you to run "python -m jupyter_micropython_kernel.install"
 #    after this pip install
 # %readbytes now looks redundant
-# record incoming bytes (eg when in enterpastemode) that haven't been printed 
+# * record incoming bytes (eg when in enterpastemode) that haven't been printed 
 #    and print them when there is Ctrl-C
-# micropython_notebooks -> developer_micropython_notebooks
-# improve the help in usage argparses
-# capability to suppress "I (200055) wifi:" messages
+# * micropython_notebooks -> developer_micropython_notebooks
+# * improve the help in usage argparses
+# * capability to suppress "I (200055) wifi:" messages
+# * build a serial/socket handling object class
 
 # merge uncoming serial stream and break at OK, \x04, >, \r\n, and long delays 
 def yieldserialchunk(s):
