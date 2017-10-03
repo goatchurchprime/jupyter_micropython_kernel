@@ -36,25 +36,19 @@ def parseap(ap, percentstringargs1):
     except SystemExit:  # argparse throws these because it assumes you only want to do the command line
         return None  # should be a default one
         
-# * build a serial/socket handling object class
 # * sendtofile has -a for append
-# * robust starting up when already in paste mode (it does some continual junk printing if you are lucky)
+# * left in buffer not taking account of brebootdetected
 
 # then make the websocket from the ESP32 as well
 # then make one that serves out sensor data just automatically
 # and access and read that from javascript
 # and get the webserving of webpages (and javascript) also to happen
 
-# * insert comment reminding you to run "python -m jupyter_micropython_kernel.install"
-#    after this pip install
-
 # %readbytes now looks redundant
 # * record incoming bytes (eg when in enterpastemode) that haven't been printed 
 #    and print them when there is Ctrl-C
 
 # * improve the help in usage argparses
-
-
 
 
 class MicroPythonKernel(Kernel):

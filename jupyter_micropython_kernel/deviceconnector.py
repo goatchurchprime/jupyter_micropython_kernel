@@ -83,6 +83,7 @@ class DeviceConnector:
         return b"".join(res)
 
     def disconnect(self):
+        self.workingserialchunk = None
         if self.workingserial is not None:
             self.sres("Closing serial {}\n".format(str(self.workingserial)))
             self.workingserial.close() 
@@ -122,7 +123,8 @@ class DeviceConnector:
             if self.workingserial.isOpen():
                 break
             time.sleep(0.01)
-        self.sres("Waited {} seconds for isOpen()\n".format(i*0.01))
+        if i != 0:
+            self.sres("Waited {} seconds for isOpen()\n".format(i*0.01))
         
     def socketconnect(self, ipnumber, portnumber):
         self.disconnect()
@@ -200,7 +202,10 @@ class DeviceConnector:
                     except UnicodeDecodeError:
                         ur = str(rline)
                     if not wifimessageignore.match(ur):
-                         self.sres(ur)
+                        if n04count == 1:
+                            self.sres("\x1b\[1m{}\x1b\[0m".format(ur))
+                        else:
+                            self.sres(ur)
         
             # else on the for-loop, means the generator has ended at a stop iteration
             # this happens with Keyboard interrupt, and generator needs to be rebuilt
