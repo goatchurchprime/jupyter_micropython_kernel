@@ -85,6 +85,9 @@ this interface relies on the ctrl-A non-echoing paste mode to do its stuff.
 
 ## Debugging
 
+For reference, the notebooks here might be useful:
+  https://github.com/goatchurchprime/jupyter_micropython_developer_notebooks
+
 The system works by finding and connecting to a serial line and
 then issuing the enter paste mode command Ctrl-A (hex 0x01)
 

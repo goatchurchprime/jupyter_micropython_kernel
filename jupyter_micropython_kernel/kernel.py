@@ -46,7 +46,6 @@ def parseap(ap, percentstringargs1):
 # and get the webserving of webpages (and javascript) also to happen
 
 # * wifi settings and passwords into a file saved on the ESP
-# * change name of sres() to sres() for string_response()
 
 # * find out how sometimes things get printed in green
 #    colour change to green is done by the character \x1b
@@ -62,57 +61,7 @@ def parseap(ap, percentstringargs1):
 
 # * improve the help in usage argparses
 
-# see http://ascii-table.com/ansi-escape-sequences.php for colour codes on lines
-wifimessageignore = re.compile("(\x1b\[[\d;]*m)?[WI] \(\d+\) (wifi|system_api|modsocket|phy|event): ")
 
-
-# merge uncoming serial stream and break at OK, \x04, >, \r\n, and long delays 
-def yieldserialchunk(s):
-    res = [ ]
-    n = 0
-    while True:
-        try:
-            if type(s) == serial.Serial:
-                b = s.read()
-            else:
-                r,w,e = select.select([s], [], [], serialtimeout)
-                if r:
-                    b = s._sock.recv(1)
-                else:
-                    b = b''
-                    
-        except serial.SerialException as e:
-            yield b"\r\n**[ys] "
-            yield str(type(e)).encode("utf8")
-            yield b"\r\n**[ys] "
-            yield str(e).encode("utf8")
-            yield b"\r\n\r\n"
-            break
-            
-        if not b:
-            if res and (res[0] != 'O' or len(res) > 3):
-                yield b''.join(res)
-                res.clear()
-            else:
-                n += 1
-                if (n%serialtimeoutcount) == 0:
-                    yield b''   # yield a blank line every (serialtimeout*serialtimeoutcount) seconds
-                
-        elif b == b'K' and len(res) >= 1 and res[-1] == b'O':
-            if len(res) > 1:
-                yield b''.join(res[:-1])
-            yield b'OK'
-            res.clear()
-        elif b == b'\x04' or b == b'>':
-            if res:
-                yield b''.join(res)
-            yield b
-            res.clear()
-        else:
-            res.append(b)
-            if b == b'\n' and len(res) >= 2 and res[-2] == b'\r':
-                yield b''.join(res)
-                res.clear()
 
 
 class MicroPythonKernel(Kernel):
@@ -129,97 +78,26 @@ class MicroPythonKernel(Kernel):
     def __init__(self, **kwargs):
         Kernel.__init__(self, **kwargs)
         self.silent = False
+        self.dc = deviceconnector.DeviceConnector(self.sres)
         self.workingserial = None  # a serial.Serial or a socket.SocketIO
-        self.workingserialchunk = None
         
     def workingserialreadall(self):  # usually used to clear the incoming buffer
-        assert self.workingserial is not None
-        if type(self.workingserial) == serial.Serial:
-            return self.workingserial.read_all()
-
-        # socket case, get it all down
-        res = [ ]
-        while True:
-            r,w,e = select.select([self.workingserial._sock],[],[],0)
-            if not r:
-                break
-            res.append(self.workingserial._sock.recv(1000))
-            self.sres("Selected socket {}  {}\n".format(len(res), len(res[-1])))
-        return b"".join(res)
-        
+        return self.dc.workingserialreadall()
         
     def serialconnect(self, portname, baudrate):
-        if self.workingserial is not None:
-            self.sres("Closing old serial {}\n".format(str(self.workingserial)))
-            self.workingserial.close()
-            self.workingserial = None
-
-        if type(portname) is int:
-            possibleports = deviceconnector.guessserialport()
-            if possibleports:
-                portname = possibleports[portname]
-                if len(possibleports) > 1:
-                    self.sres("Found serial ports {}: \n".format(", ".join(possibleports)))
-            else:
-                self.sres("No possible ports found")
-                portname = ("COM4" if sys.platform == "win32" else "/dev/ttyUSB0")
-            
-        self.sres("Connecting to Serial {} baud={}\n".format(portname, baudrate))
-        try:
-            self.workingserial = serial.Serial(portname, baudrate, timeout=serialtimeout)
-        except serial.SerialException as e:
-            self.sres(e.strerror)
-            self.sres("\n")
-            possibleports = deviceconnector.guessserialport()
-            if possibleports:
-                self.sres("\nTry one of these ports:\n  {}".format("\n  ".join(possibleports)))
-            else:
-                self.sres("\nAre you sure your ESP-device is plugged in?")
-            return
-            
-        for i in range(5001):
-            if self.workingserial.isOpen():
-                break
-            time.sleep(0.01)
-        self.sres("Waited {} seconds for isOpen()\n".format(i*0.01))
-        
+        self.dc.serialconnect(portname, baudrate)
+        self.workingserial = self.dc.workingserial
 
     def socketconnect(self, ipnumber, portnumber):
-        if self.workingserial is not None:
-            self.sres("Closing old serial {}\n".format(str(self.workingserial)))
-            self.workingserial.close()
-            self.workingserial = None
+        self.dc.socketconnect(ipnumber, portnumber)
+        self.workingserial = self.dc.workingsocket
 
-        self.sres("Connecting to socket ({} {})\n".format(ipnumber, portnumber))
-        s = socket.socket()
-        self.sres("Connecting to socket ({} {})\n".format(ipnumber, portnumber))
-        try:
-            self.sres("preconnect\n")
-            s.connect(socket.getaddrinfo(ipnumber, portnumber)[0][-1])
-            self.sres("Doing makefile\n")
-            self.workingserial = s.makefile('rwb', 0)
-        except OSError as e:
-            self.sres("Socket OSError {}".format(str(e)))
-        except ConnectionRefusedError as e:
-            self.sres("Socket ConnectionRefusedError {}".format(str(e)))
+    def receivestream(self, bseekokay, bwarnokaypriors=True, b5secondtimeout=False):
+        self.dc.receivestream(bseekokay, bwarnokaypriors, b5secondtimeout)
 
-
-    def sendtofile(self, destinationfilename, bappend, cellcontents):
-        for i, line in enumerate(cellcontents.splitlines(True)):
-            if i == 0:
-                self.workingserial.write("O=open({}, '{}')\r\n".format(repr(destinationfilename), ("a" if bappend else "w")).encode())
-                continue
-                
-            self.workingserial.write("O.write({})\r\n".format(repr(line)).encode())
-            if (i%10) == 0:
-                self.workingserial.write(b'\r\x04')
-                self.receivestream(bseekokay=True)
-                self.sres("{} lines sent so far\n".format(i))
-
-        self.workingserial.write("O.close()\r\n".encode())
-        self.workingserial.write(b'\r\x04')
-        self.receivestream(bseekokay=True)
-        self.sres("{} lines sent done".format(len(cmdlines)-1))
+    def enterpastemode(self):
+        self.dc.enterpastemode()
+        
 
     
     def interpretpercentline(self, percentline, cellcontents):
@@ -263,10 +141,8 @@ class MicroPythonKernel(Kernel):
             return None
 
         if percentcommand == "%disconnect":
-            if self.workingserial is not None:
-                self.sres("Closing serial {}\n".format(str(self.workingserial)))
-                self.workingserial.close() 
-                self.workingserial = None
+            self.dc.disconnect()
+            self.workingserial = None
             return None
         
         # remaining commands require a connection
@@ -310,7 +186,7 @@ class MicroPythonKernel(Kernel):
         if percentcommand == ap_sendtofile.prog:
             apargs = parseap(ap_sendtofile, percentstringargs[1:])
             cellcontents = re.sub("^\s*%sendtofile.*\n(?:[ \r]*\n)?", "", cellcontents)
-            self.sendtofile(apargs.destinationfilename, apargs.a, cellcontents)
+            self.dc.sendtofile(apargs.destinationfilename, apargs.a, cellcontents)
             return None
 
         return cellcontents
@@ -359,87 +235,6 @@ class MicroPythonKernel(Kernel):
         if cellcontents:
             self.runnormalcell(cellcontents, bsuppressendcode)
             
-    def enterpastemode(self):
-        assert self.workingserial
-        # now sort out connection situation
-        self.workingserial.write(b'\r\x03\x03')    # ctrl-C: kill off running programs
-        l = self.workingserialreadall()
-        if l:
-            self.sres('[x03x03] ')
-            self.sres(str(l))
-        #self.workingserial.write(b'\r\x02')        # ctrl-B: leave paste mode if still in it <-- doesn't work as when not in paste mode it reboots the device
-        self.workingserial.write(b'\r\x01')        # ctrl-A: enter raw REPL
-        self.workingserial.write(b'1\x04')         # single character program to run so receivestream works
-        self.receivestream(bseekokay=True, bwarnokaypriors=False)
-
-    def receivestream(self, bseekokay, bwarnokaypriors=True, b5secondtimeout=False):
-        n04count = 0
-        brebootdetected = False
-        for j in range(2):  # for restarting the chunking when interrupted
-            if self.workingserialchunk is None:
-                self.workingserialchunk = yieldserialchunk(self.workingserial)
- 
-            indexprevgreaterthansign = -1
-            for i, rline in enumerate(self.workingserialchunk):
-                assert rline is not None
-                
-                # warning message when we are waiting on an OK
-                if bseekokay and bwarnokaypriors and (rline != b'OK') and (rline != b'>') and rline.strip():
-                    self.sres("\n[missing-OK]")
- 
-                # the main interpreting loop
-                if rline == b'OK' and bseekokay:
-                    if i != 0 and bwarnokaypriors:
-                        self.sres("\n\n[Late OK]\n\n")
-                    bseekokay = False
-
-                # one of 2 Ctrl-Ds in the return from execute in paste mode
-                elif rline == b'\x04':
-                    n04count += 1
-
-                # leaving condition where OK...x04...x04...> has been found in paste mode
-                elif rline == b'>' and n04count >= 2 and not bseekokay:
-                    if n04count != 2:
-                        self.sres("[too many x04s %d]" % n04count)
-                    break
-
-                elif rline == b'':
-                    if b5secondtimeout:
-                        self.sres("[Timed out waiting for recognizable response]\n")
-                        break
-                    self.sres(".")  # dot holding position to prove it's alive
-
-                elif rline == b'Type "help()" for more information.\r\n':
-                    brebootdetected = True
-                    self.sres(rline.decode())
-                    
-                elif rline == b'>':
-                    indexprevgreaterthansign = i
-                    self.sres('>')
-                    
-                # looks for ">>> "
-                elif rline == b' ' and brebootdetected and indexprevgreaterthansign == i-1: 
-                    self.sres("[reboot detected %d]" % n04count)
-                    self.enterpastemode()  # this is unintentionally recursive, but after a reboot has been seen we need to get into paste mode
-                    self.sres(' ')
-                    break
-                    
-                # normal processing of the string of bytes that have come in
-                else:
-                    try:
-                        ur = rline.decode()
-                    except UnicodeDecodeError:
-                        ur = str(rline)
-                    if not wifimessageignore.match(ur):
-                         self.sres(ur)
-        
-            # else on the for-loop, means the generator has ended at a stop iteration
-            # this happens with Keyboard interrupt, and generator needs to be rebuilt
-            else:  # of the for-command 
-                self.workingserialchunk = None
-                continue
-                    
-            break   # out of the for loop
 
     def sres(self, output):
         if not self.silent:
@@ -469,7 +264,7 @@ class MicroPythonKernel(Kernel):
                         ur = pbline.decode()
                     except UnicodeDecodeError:
                         ur = str(pbline)
-                    if wifimessageignore.match(ur):
+                    if deviceconnector.wifimessageignore.match(ur):
                         continue   # filter out boring wifi status messages
                     self.sres('[leftinbuffer] ')
                     self.sres(str([ur]))
