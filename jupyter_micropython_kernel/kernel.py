@@ -28,7 +28,9 @@ ap_writebytes.add_argument('stringtosend', type=str)
 
 ap_sendtofile = argparse.ArgumentParser(prog="%sendtofile", description="send a file to the microcontroller's file system", add_help=False)
 ap_sendtofile.add_argument('-a', help='append', action='store_true')
+ap_sendtofile.add_argument('-b', help='binary', action='store_true')
 ap_sendtofile.add_argument('destinationfilename', type=str)
+ap_sendtofile.add_argument('--source', help="source file", type=str, default="<<cellcontents>>", nargs="?")
 
 def parseap(ap, percentstringargs1):
     try:
@@ -97,7 +99,7 @@ class MicroPythonKernel(Kernel):
             self.sres("%readbytes\n    does serial.read_all()\n\n")
             self.sres("%rebootdevice\n    reboots device\n\n")
             self.sres(re.sub("usage: ", "", ap_sendtofile.format_usage()))
-            self.sres("    send cell contents or file to device file\n\n")
+            self.sres("    send cell contents or file from disk to device file\n\n")
             self.sres(re.sub("usage: ", "", ap_serialconnect.format_usage()))
             self.sres("    connects to a device over USB wire\n\n")
             self.sres(re.sub("usage: ", "", ap_socketconnect.format_usage()))
@@ -145,8 +147,12 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == ap_sendtofile.prog:
             apargs = parseap(ap_sendtofile, percentstringargs[1:])
-            cellcontents = re.sub("^\s*%sendtofile.*\n(?:[ \r]*\n)?", "", cellcontents)
-            self.dc.sendtofile(apargs.destinationfilename, apargs.a, cellcontents)
+            if apargs.source == "<<cellcontents>>":
+                filecontents = re.sub("^\s*%sendtofile.*\n(?:[ \r]*\n)?", "", cellcontents)
+            else:
+                fname = apargs.source or apargs.destinationfilename
+                filecontents = open(fname, ("rb" if apargs.b else "r")).read()
+            self.dc.sendtofile(apargs.destinationfilename, apargs.a, apargs.b, filecontents)
             return None
 
         self.sres("Unrecognized percentline {}\n".format([percentline]), 31)
@@ -186,7 +192,7 @@ class MicroPythonKernel(Kernel):
                 return
                 
         if not self.dc.serialexists():
-            self.sres("No serial connected\n", 1)
+            self.sres("No serial connected\n", 31)
             self.sres("  %serialconnect to connect\n")
             self.sres("  %lsmagic to list commands")
             return
@@ -217,7 +223,7 @@ class MicroPythonKernel(Kernel):
                 interrupted = True
             except OSError as e:
                 priorbuffer = []
-                self.sres("\n\n***Connecton broken [%s]\n" % str(e.strerror))
+                self.sres("\n\n***Connecton broken [%s]\n" % str(e.strerror), 31)
                 self.sres("You may need to reconnect")
                 
             if priorbuffer:

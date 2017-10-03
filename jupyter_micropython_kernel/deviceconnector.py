@@ -1,4 +1,4 @@
-import logging, sys, time, os, re
+import logging, sys, time, os, re, base64
 import serial, socket, serial.tools.list_ports, select
 
 serialtimeout = 0.5
@@ -151,6 +151,7 @@ class DeviceConnector:
                 self.workingserialchunk = yieldserialchunk(self.workingserial or self.workingsocket)
  
             indexprevgreaterthansign = -1
+            index04line = -1
             for i, rline in enumerate(self.workingserialchunk):
                 assert rline is not None
                 
@@ -167,6 +168,7 @@ class DeviceConnector:
                 # one of 2 Ctrl-Ds in the return from execute in paste mode
                 elif rline == b'\x04':
                     n04count += 1
+                    index04line = i
 
                 # leaving condition where OK...x04...x04...> has been found in paste mode
                 elif rline == b'>' and n04count >= 2 and not bseekokay:
@@ -202,7 +204,8 @@ class DeviceConnector:
                     except UnicodeDecodeError:
                         ur = str(rline)
                     if not wifimessageignore.match(ur):
-                        if n04count == 1:
+                        if n04count == 1 and (i == index04line+1):
+                            self.sres("\n")
                             self.sres(ur, 1)
                         else:
                             self.sres(ur)
@@ -215,20 +218,40 @@ class DeviceConnector:
                     
             break   # out of the for loop
 
-    def sendtofile(self, destinationfilename, bappend, cellcontents):
+    def sendtofile(self, destinationfilename, bappend, bbinary, filecontents):
         if self.workingserial:
-            self.workingserial.write("O=open({}, '{}')\r\n".format(repr(destinationfilename), ("a" if bappend else "w")).encode())
-            for i, line in enumerate(cellcontents.splitlines(True)):
-                self.workingserial.write("O.write({})\r\n".format(repr(line)).encode())
-                if (i%10) == 9:
-                    self.workingserial.write(b'\r\x04')  # intermediate executions
-                    self.receivestream(bseekokay=True)
-                    self.sres("{} lines sent so far\n".format(i+1))
+            fmodifier = ("a" if bappend else "w")+("b" if bbinary else "")
+            if bbinary:
+                self.workingserial.write(b"import ubinascii; O6 = ubinascii.a2b_base64\r\n")
+            self.workingserial.write("O=open({}, '{}')\r\n".format(repr(destinationfilename), fmodifier).encode())
+            if bbinary:
+                chunksize = 30
+                for i in range(int(len(filecontents)/chunksize)+1):
+                    bchunk = filecontents[i*chunksize:(i+1)*chunksize]
+                    self.workingserial.write(b'O.write(O6("')
+                    self.workingserial.write(base64.encodebytes(bchunk)[:-1])
+                    self.workingserial.write(b'"))\r\n')
+                    if (i%10) == 9:
+                        self.workingserial.write(b'\r\x04')  # intermediate executions
+                        self.receivestream(bseekokay=True)
+                        self.sres("{} chunks sent so far\n".format(i+1))
+                self.sres("{} chunks sent done".format(i+1))
+                
+            else:
+                for i, line in enumerate(filecontents.splitlines(True)):
+                    self.workingserial.write("O.write({})\r\n".format(repr(line)).encode())
+                    if (i%10) == 9:
+                        self.workingserial.write(b'\r\x04')  # intermediate executions
+                        self.receivestream(bseekokay=True)
+                        self.sres("{} lines sent so far\n".format(i+1))
+                self.sres("{} lines sent done".format(i+1))
 
             self.workingserial.write("O.close()\r\n".encode())
             self.workingserial.write(b'\r\x04')
             self.receivestream(bseekokay=True)
-            self.sres("{} lines sent done".format(i+1))
+            
+        else:
+            self.sres("File transfers implemented for sockets\n")
 
     def enterpastemode(self):
         # now sort out connection situation
