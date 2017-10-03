@@ -5,8 +5,7 @@ serialtimeout = 0.5
 serialtimeoutcount = 10
 
 # see http://ascii-table.com/ansi-escape-sequences.php for colour codes on lines
-wifimessageignore = re.compile("(\x1b\[[\d;]*m)?[WI] \(\d+\) (wifi|system_api|modsocket|phy|event): ")
-
+wifimessageignore = re.compile("(\x1b\[[\d;]*m)?[WI] \(\d+\) (wifi|system_api|modsocket|phy|event|cpu_start|heap_init): ")
 
 # this should take account of the operating system
 def guessserialport():  
@@ -241,3 +240,29 @@ class DeviceConnector:
             self.workingsocket.write(b'1\x04')         # single character program to run so receivestream works
         self.receivestream(bseekokay=True, bwarnokaypriors=False)
 
+    def writebytes(self, bytestosend):
+        if self.workingserial:
+            nbyteswritten = self.workingserial.write(bytestosend)
+            return ("serial.write {} bytes to {} at baudrate {}".format(nbyteswritten, self.workingserial.port, self.workingserial.baudrate))
+        else:
+            nbyteswritten = self.workingsocket.write(bytestosend)
+            return ("serial.write {} bytes to {}".format(nbyteswritten, str(self.workingsocket)))
+
+    def sendrebootmessage(self):
+        if self.workingserial:
+            self.workingserial.write(b"\x03\r")  # quit any running program
+            self.workingserial.write(b"\x02\r")  # exit the paste mode with ctrl-B
+            self.workingserial.write(b"\x04\r")  # soft reboot code
+
+    def writeline(self, line):
+        if self.workingserial:
+            self.workingserial.write(line.encode("utf8"))
+            self.workingserial.write(b'\r\n')
+        else:
+            self.workingsocket.write(line.encode("utf8"))
+            self.workingsocket.write(b'\r\n')
+
+    def serialexists(self):
+        return self.workingserial or self.workingsocket
+        
+        

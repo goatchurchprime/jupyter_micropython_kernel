@@ -38,19 +38,12 @@ def parseap(ap, percentstringargs1):
         
 # * build a serial/socket handling object class
 # * sendtofile has -a for append
-# * robust starting up when already in paste mode
+# * robust starting up when already in paste mode (it does some continual junk printing if you are lucky)
 
 # then make the websocket from the ESP32 as well
 # then make one that serves out sensor data just automatically
 # and access and read that from javascript
 # and get the webserving of webpages (and javascript) also to happen
-
-# * wifi settings and passwords into a file saved on the ESP
-
-# * find out how sometimes things get printed in green
-#    colour change to green is done by the character \x1b
-#    don't know how to change back to black or to the yellow colour  (these are the syntax highlighting colours)
-#    full code is of the form \x1b[0;30m
 
 # * insert comment reminding you to run "python -m jupyter_micropython_kernel.install"
 #    after this pip install
@@ -79,26 +72,6 @@ class MicroPythonKernel(Kernel):
         Kernel.__init__(self, **kwargs)
         self.silent = False
         self.dc = deviceconnector.DeviceConnector(self.sres)
-        self.workingserial = None  # a serial.Serial or a socket.SocketIO
-        
-    def workingserialreadall(self):  # usually used to clear the incoming buffer
-        return self.dc.workingserialreadall()
-        
-    def serialconnect(self, portname, baudrate):
-        self.dc.serialconnect(portname, baudrate)
-        self.workingserial = self.dc.workingserial
-
-    def socketconnect(self, ipnumber, portnumber):
-        self.dc.socketconnect(ipnumber, portnumber)
-        self.workingserial = self.dc.workingsocket
-
-    def receivestream(self, bseekokay, bwarnokaypriors=True, b5secondtimeout=False):
-        self.dc.receivestream(bseekokay, bwarnokaypriors, b5secondtimeout)
-
-    def enterpastemode(self):
-        self.dc.enterpastemode()
-        
-
     
     def interpretpercentline(self, percentline, cellcontents):
         percentstringargs = shlex.split(percentline)
@@ -106,24 +79,24 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == ap_serialconnect.prog:
             apargs = parseap(ap_serialconnect, percentstringargs[1:])
-            self.serialconnect(apargs.portname, apargs.baudrate)
-            if self.workingserial:
+            self.dc.serialconnect(apargs.portname, apargs.baudrate)
+            if self.dc.workingserial:
                 self.sres("\n ** Serial connected **\n\n")
-                self.sres(str(self.workingserial))
+                self.sres(str(self.dc.workingserial))
                 self.sres("\n")
                 if not apargs.raw:
-                    self.enterpastemode()
+                    self.dc.enterpastemode()
             return None
 
         if percentcommand == ap_socketconnect.prog:
             apargs = parseap(ap_socketconnect, percentstringargs[1:])
-            self.socketconnect(apargs.ipnumber, apargs.portnumber)
-            if self.workingserial:
+            self.dc.socketconnect(apargs.ipnumber, apargs.portnumber)
+            if self.dc.workingsocket:
                 self.sres("\n ** Socket connected **\n\n")
-                self.sres(str(self.workingserial))
+                self.sres(str(self.dc.workingsocket))
                 self.sres("\n")
                 #if not apargs.raw:
-                #    self.enterpastemode()
+                #    self.dc.enterpastemode()
             return None
 
         if percentcommand == "%lsmagic":
@@ -142,33 +115,25 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == "%disconnect":
             self.dc.disconnect()
-            self.workingserial = None
             return None
         
         # remaining commands require a connection
-        if self.workingserial is None:
+        if self.dc.serialexists():
             return cellcontents
             
         if percentcommand == ap_writebytes.prog:
             apargs = parseap(ap_writebytes, percentstringargs[1:])
             bytestosend = apargs.stringtosend.encode().decode("unicode_escape").encode()
-            nbyteswritten = self.workingserial.write(bytestosend)
-            if type(self.workingserial) == serial.Serial:
-                self.sres("serial.write {} bytes to {} at baudrate {}".format(nbyteswritten, self.workingserial.port, self.workingserial.baudrate))
-            else:
-                self.sres("serial.write {} bytes to {}".format(nbyteswritten, str(self.workingserial)))
-            return None
+            self.sres(self.dc.writebytes(bytestosend))
             
         if percentcommand == "%readbytes":
-            l = self.workingserialreadall()
+            l = self.dc.workingserialreadall()
             self.sres(str([l]))
             return None
             
         if percentcommand == "%rebootdevice":
-            self.workingserial.write(b"\x03\r")  # quit any running program
-            self.workingserial.write(b"\x02\r")  # exit the paste mode with ctrl-B
-            self.workingserial.write(b"\x04\r")  # soft reboot code
-            self.enterpastemode()
+            self.dc.sendrebootmessage()
+            self.dc.enterpastemode()
             return None
             
         if percentcommand == "%reboot":
@@ -193,7 +158,7 @@ class MicroPythonKernel(Kernel):
         
     def runnormalcell(self, cellcontents, bsuppressendcode):
         cmdlines = cellcontents.splitlines(True)
-        r = self.workingserialreadall()
+        r = self.dc.workingserialreadall()
         if r:
             self.sres('[priorstuff] ')
             self.sres(str(r))
@@ -204,16 +169,15 @@ class MicroPythonKernel(Kernel):
                     line = line[:-2]
                 elif line[-1] == '\n':
                     line = line[:-1]
-                self.workingserial.write(line.encode("utf8"))
-                self.workingserial.write(b'\r\n')
-                r = self.workingserialreadall()
+                self.dc.writeline(line)
+                r = self.dc.workingserialreadall()
                 if r:
                     self.sres('[duringwriting] ')
                     self.sres(str(r))
                     
         if not bsuppressendcode:
-            self.workingserial.write(b'\r\x04')
-            self.receivestream(bseekokay=True)
+            self.dc.writebytes(b'\r\x04')
+            self.dc.receivestream(bseekokay=True)
         
     def sendcommand(self, cellcontents):
         bsuppressendcode = False  # can't yet see how to get this signal through
@@ -225,7 +189,7 @@ class MicroPythonKernel(Kernel):
             if cellcontents is None:
                 return
                 
-        if self.workingserial is None:
+        if not self.dc.serialexists():
             self.sres("No serial connected\n")
             self.sres("  %serialconnect to connect\n")
             self.sres("  %lsmagic to list commands")
@@ -247,10 +211,10 @@ class MicroPythonKernel(Kernel):
             return {'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {}}
 
         interrupted = False
-        if self.workingserial:
+        if self.dc.serialexists():
             priorbuffer = None
             try:
-                priorbuffer = self.workingserialreadall()
+                priorbuffer = self.dc.workingserialreadall()
             except KeyboardInterrupt:
                 interrupted = True
             except OSError as e:
@@ -283,10 +247,10 @@ class MicroPythonKernel(Kernel):
 
         if interrupted:
             self.sres("\n\n*** Sending Ctrl-C\n\n")
-            if self.workingserial:
-                self.workingserial.write(b'\r\x03')
+            if self.dc.serialexists():
+                self.dc.writebytes(b'\r\x03')
                 interrupted = True
-                self.receivestream(bseekokay=False, b5secondtimeout=True)
+                self.dc.receivestream(bseekokay=False, b5secondtimeout=True)
             return {'status': 'abort', 'execution_count': self.execution_count}
 
         # everything already gone out with send_response(), but could detect errors (text between the two \x04s
