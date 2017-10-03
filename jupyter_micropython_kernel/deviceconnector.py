@@ -203,7 +203,7 @@ class DeviceConnector:
                         ur = str(rline)
                     if not wifimessageignore.match(ur):
                         if n04count == 1:
-                            self.sres("\x1b\[1m{}\x1b\[0m".format(ur))
+                            self.sres("\x1b[1m{}\x1b[0m".format(ur))
                         else:
                             self.sres(ur)
         

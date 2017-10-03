@@ -94,17 +94,20 @@ class MicroPythonKernel(Kernel):
             return None
 
         if percentcommand == "%lsmagic":
-            self.sres(ap_serialconnect.format_usage())
-            self.sres("%lsmagic list magic commands\n")
-            self.sres("%suppressendcode doesn't send x04 or wait to read after sending the cell\n")
-            self.sres("  (assists for debugging using %writebytes and %readbytes)\n")
-            self.sres("%writebytes does serial.write() on a string b'binary_stuff' \n")
-            self.sres(ap_writebytes.format_usage())
-            self.sres("%readbytes does serial.read_all()\n")
-            self.sres("%rebootdevice reboots device\n")
-            self.sres("%disconnects disconnects serial\n")
-            self.sres(ap_sendtofile.format_usage())
-            self.sres(ap_socketconnect.format_usage())
+            self.sres("%disconnect\n    disconnects serial\n\n")
+            self.sres("%lsmagic\n    list magic commands\n\n")
+            self.sres("%readbytes\n    does serial.read_all()\n\n")
+            self.sres("%rebootdevice\n    reboots device\n\n")
+            self.sres(re.sub("usage: ", "", ap_sendtofile.format_usage()))
+            self.sres("    send cell contents or file to device file\n\n")
+            self.sres(re.sub("usage: ", "", ap_serialconnect.format_usage()))
+            self.sres("    connects to a device over USB wire\n\n")
+            self.sres(re.sub("usage: ", "", ap_socketconnect.format_usage()))
+            self.sres("    connects to a socket of a device over wifi\n\n")
+            self.sres("%suppressendcode\n    doesn't send x04 or wait to read after sending the cell\n")
+            self.sres("  (assists for debugging using %writebytes and %readbytes)\n\n")
+            self.sres(re.sub("usage: ", "", ap_writebytes.format_usage()))
+            self.sres("    does serial.write() of the python quoted string given\n\n")
             return None
 
         if percentcommand == "%disconnect":
