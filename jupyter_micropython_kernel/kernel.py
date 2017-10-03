@@ -48,8 +48,6 @@ def parseap(ap, percentstringargs1):
 # * record incoming bytes (eg when in enterpastemode) that haven't been printed 
 #    and print them when there is Ctrl-C
 
-# * improve the help in usage argparses
-
 
 class MicroPythonKernel(Kernel):
     implementation = 'micropython_kernel'
@@ -75,7 +73,7 @@ class MicroPythonKernel(Kernel):
             apargs = parseap(ap_serialconnect, percentstringargs[1:])
             self.dc.serialconnect(apargs.portname, apargs.baudrate)
             if self.dc.workingserial:
-                self.sres("\n ** Serial connected **\n\n")
+                self.sres("\n ** Serial connected **\n\n", 32)
                 self.sres(str(self.dc.workingserial))
                 self.sres("\n")
                 if not apargs.raw:
@@ -86,7 +84,7 @@ class MicroPythonKernel(Kernel):
             apargs = parseap(ap_socketconnect, percentstringargs[1:])
             self.dc.socketconnect(apargs.ipnumber, apargs.portnumber)
             if self.dc.workingsocket:
-                self.sres("\n ** Socket connected **\n\n")
+                self.sres("\n ** Socket connected **\n\n", 32)
                 self.sres(str(self.dc.workingsocket))
                 self.sres("\n")
                 #if not apargs.raw:
@@ -115,7 +113,7 @@ class MicroPythonKernel(Kernel):
             return None
         
         # remaining commands require a connection
-        if self.dc.serialexists():
+        if not self.dc.serialexists():
             return cellcontents
             
         if percentcommand == ap_writebytes.prog:
@@ -134,15 +132,15 @@ class MicroPythonKernel(Kernel):
             return None
             
         if percentcommand == "%reboot":
-            self.sres("Did you mean %rebootdevice?\n")
+            self.sres("Did you mean %rebootdevice?\n", 31)
             return None
 
         if percentcommand == "%reboot":
-            self.sres("Did you mean %rebootdevice?\n")
+            self.sres("Did you mean %rebootdevice?\n", 31)
             return None
 
         if percentcommand in ("%savetofile", "%savefile", "%sendfile"):
-            self.sres("Did you mean to write %sendtofile?\n")
+            self.sres("Did you mean to write %sendtofile?\n", 31)
             return None
 
         if percentcommand == ap_sendtofile.prog:
@@ -151,6 +149,7 @@ class MicroPythonKernel(Kernel):
             self.dc.sendtofile(apargs.destinationfilename, apargs.a, cellcontents)
             return None
 
+        self.sres("Unrecognized percentline {}\n".format([percentline]), 31)
         return cellcontents
         
     def runnormalcell(self, cellcontents, bsuppressendcode):
@@ -187,7 +186,7 @@ class MicroPythonKernel(Kernel):
                 return
                 
         if not self.dc.serialexists():
-            self.sres("No serial connected\n")
+            self.sres("No serial connected\n", 1)
             self.sres("  %serialconnect to connect\n")
             self.sres("  %lsmagic to list commands")
             return
@@ -196,9 +195,11 @@ class MicroPythonKernel(Kernel):
         if cellcontents:
             self.runnormalcell(cellcontents, bsuppressendcode)
             
-
-    def sres(self, output):
+    # 1=bold, 31=red, 32=green, 34=blue; from http://ascii-table.com/ansi-escape-sequences.php
+    def sres(self, output, asciigraphicscode=None):
         if not self.silent:
+            if asciigraphicscode:
+                output = "\x1b[{}m{}\x1b[0m".format(asciigraphicscode, output)
             stream_content = {'name': 'stdout', 'text': output}
             self.send_response(self.iopub_socket, 'stream', stream_content)
 
