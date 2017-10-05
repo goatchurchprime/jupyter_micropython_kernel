@@ -9,6 +9,6 @@ setup(name='jupyter_micropython_kernel',
       url='https://github.com/goatchurchprime/jupyter_micropython_kernel',
       license='GPL3',
       packages=['jupyter_micropython_kernel'],
-      install_requires=['pyserial']
+      install_requires=['pyserial', 'websocket']
 )
 

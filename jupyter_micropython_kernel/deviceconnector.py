@@ -1,5 +1,6 @@
 import logging, sys, time, os, re, base64
 import serial, socket, serial.tools.list_ports, select
+import websocket  # the old non async one
 
 serialtimeout = 0.5
 serialtimeoutcount = 10
@@ -12,6 +13,7 @@ def guessserialport():
     return sorted([x[0]  for x in serial.tools.list_ports.grep("")])
 
 # merge uncoming serial stream and break at OK, \x04, >, \r\n, and long delays 
+# (must make this a member function so does not have to switch on the type of s)
 def yieldserialchunk(s):
     res = [ ]
     n = 0
@@ -19,10 +21,18 @@ def yieldserialchunk(s):
         try:
             if type(s) == serial.Serial:
                 b = s.read()
-            else:
+            elif type(s) == socket.socket:
                 r,w,e = select.select([s], [], [], serialtimeout)
                 if r:
                     b = s._sock.recv(1)
+                else:
+                    b = b''
+            else:  # websocket
+                r,w,e = select.select([s], [], [], serialtimeout)
+                if r:
+                    b = s.recv()
+                    if type(b) == str:
+                        b = b.encode("utf8")   # handle fact that strings come back from this interface
                 else:
                     b = b''
                     
@@ -64,13 +74,24 @@ class DeviceConnector:
     def __init__(self, sres):
         self.workingserial = None
         self.workingsocket = None
+        self.workingwebsocket = None
         self.workingserialchunk = None
         self.sres = sres
 
-    def workingserialreadall(self):  # usually used to clear the incoming buffer
-        assert self.workingserial is not None
+    def workingserialreadall(self):  # usually used to clear the incoming buffer, results are printed out rather than used
         if self.workingserial:
             return self.workingserial.read_all()
+            
+        if self.workingwebsocket:
+            res = [ ]
+            while True:
+                r,w,e = select.select([self.workingwebsocket],[],[],0)
+                if not r:
+                    break
+                res.append(self.workingwebsocket.recv())
+            return "".join(res) # this is returning a text array, not bytes 
+                                # though a binary frame can be stipulated according to websocket.ABNF.OPCODE_MAP
+                                # fix this when we see it
 
         # socket case, get it all down
         res = [ ]
@@ -92,6 +113,10 @@ class DeviceConnector:
             self.sres("Closing socket {}\n".format(str(self.workingsocket)))
             self.workingsocket.close() 
             self.workingsocket = None
+        if self.workingwebsocket is not None:
+            self.sres("Closing websocket {}\n".format(str(self.workingwebsocket)))
+            self.workingwebsocket.close() 
+            self.workingwebsocket = None
 
     def serialconnect(self, portname, baudrate):
         self.disconnect()
@@ -143,12 +168,28 @@ class DeviceConnector:
             self.sres("Socket ConnectionRefusedError {}".format(str(e)))
             
 
+    def websocketconnect(self, websocketurl):
+        self.disconnect()
+        try:
+            self.workingwebsocket = websocket.create_connection(websocketurl, 5)
+            self.workingwebsocket.settimeout(serialtimeout)
+        except socket.timeout:
+            self.sres("Websocket Timeout after 5 seconds {}\n".format(websocketurl))
+        except ValueError as e:
+            self.sres("WebSocket ValueError {}\n".format(str(e)))
+        except ConnectionResetError as e:
+            self.sres("WebSocket ConnectionError {}\n".format(str(e)))
+        except OSError as e:
+            self.sres("WebSocket OSError {}\n".format(str(e)))
+        except websocket.WebSocketException as e:
+            self.sres("WebSocketException {}\n".format(str(e)))
+
     def receivestream(self, bseekokay, bwarnokaypriors=True, b5secondtimeout=False):
         n04count = 0
         brebootdetected = False
         for j in range(2):  # for restarting the chunking when interrupted
             if self.workingserialchunk is None:
-                self.workingserialchunk = yieldserialchunk(self.workingserial or self.workingsocket)
+                self.workingserialchunk = yieldserialchunk(self.workingserial or self.workingsocket or self.workingwebsocket)
  
             indexprevgreaterthansign = -1
             index04line = -1
@@ -219,35 +260,36 @@ class DeviceConnector:
             break   # out of the for loop
 
     def sendtofile(self, destinationfilename, bappend, bbinary, filecontents):
-        if self.workingserial:
+        if self.workingserial or self.workingwebsocket:
+            sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
             fmodifier = ("a" if bappend else "w")+("b" if bbinary else "")
             if bbinary:
-                self.workingserial.write(b"import ubinascii; O6 = ubinascii.a2b_base64\r\n")
-            self.workingserial.write("O=open({}, '{}')\r\n".format(repr(destinationfilename), fmodifier).encode())
+                sswrite(b"import ubinascii; O6 = ubinascii.a2b_base64\r\n")
+            sswrite("O=open({}, '{}')\r\n".format(repr(destinationfilename), fmodifier).encode())
             if bbinary:
                 chunksize = 30
                 for i in range(int(len(filecontents)/chunksize)+1):
                     bchunk = filecontents[i*chunksize:(i+1)*chunksize]
-                    self.workingserial.write(b'O.write(O6("')
-                    self.workingserial.write(base64.encodebytes(bchunk)[:-1])
-                    self.workingserial.write(b'"))\r\n')
+                    sswrite(b'O.write(O6("')
+                    sswrite(base64.encodebytes(bchunk)[:-1])
+                    sswrite(b'"))\r\n')
                     if (i%10) == 9:
-                        self.workingserial.write(b'\r\x04')  # intermediate executions
+                        sswrite(b'\r\x04')  # intermediate executions
                         self.receivestream(bseekokay=True)
                         self.sres("{} chunks sent so far\n".format(i+1))
                 self.sres("{} chunks sent done".format(i+1))
                 
             else:
                 for i, line in enumerate(filecontents.splitlines(True)):
-                    self.workingserial.write("O.write({})\r\n".format(repr(line)).encode())
+                    sswrite("O.write({})\r\n".format(repr(line)).encode())
                     if (i%10) == 9:
-                        self.workingserial.write(b'\r\x04')  # intermediate executions
+                        sswrite(b'\r\x04')  # intermediate executions
                         self.receivestream(bseekokay=True)
                         self.sres("{} lines sent so far\n".format(i+1))
                 self.sres("{} lines sent done".format(i+1))
 
-            self.workingserial.write("O.close()\r\n".encode())
-            self.workingserial.write(b'\r\x04')
+            sswrite("O.close()\r\n".encode())
+            sswrite(b'\r\x04')
             self.receivestream(bseekokay=True)
             
         else:
@@ -255,15 +297,16 @@ class DeviceConnector:
 
     def enterpastemode(self):
         # now sort out connection situation
-        if self.workingserial:
-            self.workingserial.write(b'\r\x03\x03')    # ctrl-C: kill off running programs
+        if self.workingserial or self.workingwebsocket:
+            sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
+            sswrite(b'\r\x03\x03')    # ctrl-C: kill off running programs
             l = self.workingserialreadall()
             if l:
                 self.sres('[x03x03] ')
                 self.sres(str(l))
             #self.workingserial.write(b'\r\x02')        # ctrl-B: leave paste mode if still in it <-- doesn't work as when not in paste mode it reboots the device
-            self.workingserial.write(b'\r\x01')        # ctrl-A: enter raw REPL
-            self.workingserial.write(b'1\x04')         # single character program to run so receivestream works
+            sswrite(b'\r\x01')        # ctrl-A: enter raw REPL
+            sswrite(b'1\x04')         # single character program to run so receivestream works
         else:
             self.workingsocket.write(b'1\x04')         # single character program to run so receivestream works
         self.receivestream(bseekokay=True, bwarnokaypriors=False)
@@ -272,6 +315,9 @@ class DeviceConnector:
         if self.workingserial:
             nbyteswritten = self.workingserial.write(bytestosend)
             return ("serial.write {} bytes to {} at baudrate {}".format(nbyteswritten, self.workingserial.port, self.workingserial.baudrate))
+        elif self.workingwebsocket:
+            nbyteswritten = self.workingwebsocket.send(bytestosend)
+            return ("serial.write {} bytes to {}".format(nbyteswritten, "websocket"))
         else:
             nbyteswritten = self.workingsocket.write(bytestosend)
             return ("serial.write {} bytes to {}".format(nbyteswritten, str(self.workingsocket)))
@@ -281,16 +327,23 @@ class DeviceConnector:
             self.workingserial.write(b"\x03\r")  # quit any running program
             self.workingserial.write(b"\x02\r")  # exit the paste mode with ctrl-B
             self.workingserial.write(b"\x04\r")  # soft reboot code
+        elif self.workingwebsocket:
+            self.workingwebsocket.send(b"\x03\r")  # quit any running program
+            self.workingwebsocket.send(b"\x02\r")  # exit the paste mode with ctrl-B
+            self.workingwebsocket.send(b"\x04\r")  # soft reboot code
 
     def writeline(self, line):
         if self.workingserial:
             self.workingserial.write(line.encode("utf8"))
             self.workingserial.write(b'\r\n')
+        elif self.workingwebsocket:
+            self.workingwebsocket.send(line.encode("utf8"))
+            self.workingwebsocket.send(b'\r\n')
         else:
             self.workingsocket.write(line.encode("utf8"))
             self.workingsocket.write(b'\r\n')
 
     def serialexists(self):
-        return self.workingserial or self.workingsocket
+        return self.workingserial or self.workingsocket or self.workingwebsocket
         
         

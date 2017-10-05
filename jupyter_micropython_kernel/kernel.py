@@ -22,6 +22,11 @@ ap_socketconnect.add_argument('--raw', help='Just open connection', action='stor
 ap_socketconnect.add_argument('ipnumber', type=str)
 ap_socketconnect.add_argument('portnumber', type=int)
 
+ap_websocketconnect = argparse.ArgumentParser(prog="%websocketconnect", add_help=False)
+ap_websocketconnect.add_argument('--raw', help='Just open connection', action='store_true')
+ap_websocketconnect.add_argument('websocketurl', type=str, default="ws://192.168.4.1:8266", nargs="?")
+ap_websocketconnect.add_argument("--password", type=str)
+
 ap_writebytes = argparse.ArgumentParser(prog="%writebytes", add_help=False)
 ap_writebytes.add_argument('-b', help='binary', action='store_true')
 ap_writebytes.add_argument('stringtosend', type=str)
@@ -38,8 +43,17 @@ def parseap(ap, percentstringargs1):
     except SystemExit:  # argparse throws these because it assumes you only want to do the command line
         return None  # should be a default one
         
-# * sendtofile has -a for append
-# * left in buffer not taking account of brebootdetected
+# 1. 8266 websocket feature into the main system
+# 2. Complete the implementation of websockets on ESP32
+# 3. Create the streaming of pulse measurements to a simple javascript frontend and listing
+# 4. Try implementing ESP32 webrepl over these websockets using exec()
+# 5. Include %magic commands for flashing the ESP firmware (defaulting to website if file not listed)
+# 6. Finish debugging the IR codes
+
+
+
+# * upgrade picoweb to handle jpg and png and js
+# * code that serves a websocket to a browser from picoweb
 
 # then make the websocket from the ESP32 as well
 # then make one that serves out sensor data just automatically
@@ -49,6 +63,30 @@ def parseap(ap, percentstringargs1):
 # %readbytes now looks redundant
 # * record incoming bytes (eg when in enterpastemode) that haven't been printed 
 #    and print them when there is Ctrl-C
+
+# the socket to ESP32 method could either run exec, or 
+# save to a file, import it, then delete the modele from sys.modules[]
+
+# * potentially run commands to commission the ESP
+#  esptool.py --port /dev/ttyUSB0 erase_flash
+#  esptool.py --port /dev/ttyUSB0 --baud 460800 write_flash --flash_size=detect 0 binaries/esp8266-20170108-v1.8.7.bin --flash_mode dio
+#  esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash -z 0x1000 esp32...
+
+# It looks like we can handle the 8266 webrepl in the following way:
+# import websocket # note no s, so not the asyncio one
+#ws = websocket.create_connection("ws://192.168.4.1:8266/")
+#result = ws.recv()
+#if result == 'Password: ':
+#    ws.send("wpass\r\n")
+#print("Received '%s'" % result)
+#ws.close()
+# and then treat like the serial port
+
+# should also handle shell-scripting other commands, like arpscan for mac address to get to ip-numbers
+
+# compress the websocket down to a single straightforward set of code
+# take 1-second of data (100 bytes) and time the release of this string 
+# to the web-browser
 
 
 class MicroPythonKernel(Kernel):
@@ -93,6 +131,26 @@ class MicroPythonKernel(Kernel):
                 #    self.dc.enterpastemode()
             return None
 
+        if percentcommand == ap_websocketconnect.prog:
+            apargs = parseap(ap_websocketconnect, percentstringargs[1:])
+            self.dc.websocketconnect(apargs.websocketurl)
+            if self.dc.workingwebsocket: 
+                self.sres("\n ** WebSocket connected **\n\n", 32)
+                self.sres(str(self.dc.workingwebsocket))
+                self.sres("\n")
+                if not apargs.raw:
+                    pline = self.dc.workingwebsocket.recv()
+                    self.sres(pline)
+                    if pline == 'Password: ' and apargs.password is not None:
+                        self.dc.workingwebsocket.send(apargs.password)
+                        self.dc.workingwebsocket.send("\r\n")
+                        res = self.dc.workingserialreadall()
+                        self.sres(res)  # '\r\nWebREPL connected\r\n>>> '
+                        if not apargs.raw:
+                            self.dc.enterpastemode()
+            return None
+            
+
         if percentcommand == "%lsmagic":
             self.sres("%disconnect\n    disconnects serial\n\n")
             self.sres("%lsmagic\n    list magic commands\n\n")
@@ -106,6 +164,9 @@ class MicroPythonKernel(Kernel):
             self.sres("    connects to a socket of a device over wifi\n\n")
             self.sres("%suppressendcode\n    doesn't send x04 or wait to read after sending the cell\n")
             self.sres("  (assists for debugging using %writebytes and %readbytes)\n\n")
+            self.sres(re.sub("usage: ", "", ap_websocketconnect.format_usage()))
+            self.sres("    connects to the webREPL websocket of an ESP8266 over wifi\n")
+            self.sres("    websocketurl defaults to ws://192.168.4.1:8266 but be sure to be connected\n\n")
             self.sres(re.sub("usage: ", "", ap_writebytes.format_usage()))
             self.sres("    does serial.write() of the python quoted string given\n\n")
             return None
@@ -122,6 +183,7 @@ class MicroPythonKernel(Kernel):
             apargs = parseap(ap_writebytes, percentstringargs[1:])
             bytestosend = apargs.stringtosend.encode().decode("unicode_escape").encode()
             self.sres(self.dc.writebytes(bytestosend))
+            return None
             
         if percentcommand == "%readbytes":
             l = self.dc.workingserialreadall()
@@ -137,6 +199,10 @@ class MicroPythonKernel(Kernel):
             self.sres("Did you mean %rebootdevice?\n", 31)
             return None
 
+        if percentcommand == "%sendbytes":
+            self.sres("Did you mean %writebytes?\n", 31)
+            return None
+            
         if percentcommand == "%reboot":
             self.sres("Did you mean %rebootdevice?\n", 31)
             return None
@@ -215,7 +281,9 @@ class MicroPythonKernel(Kernel):
             return {'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {}}
 
         interrupted = False
-        if self.dc.serialexists():
+        
+        # clear buffer out before executing any commands (except the readbytes one)
+        if self.dc.serialexists() and not re.match("%readbytes", code):
             priorbuffer = None
             try:
                 priorbuffer = self.dc.workingserialreadall()
@@ -227,15 +295,17 @@ class MicroPythonKernel(Kernel):
                 self.sres("You may need to reconnect")
                 
             if priorbuffer:
-                for pbline in priorbuffer.splitlines():
+                if type(priorbuffer) == bytes:
                     try:
-                        ur = pbline.decode()
+                        priorbuffer = priorbuffer.decode()
                     except UnicodeDecodeError:
-                        ur = str(pbline)
-                    if deviceconnector.wifimessageignore.match(ur):
+                        priorbuffer = str(priorbuffer)
+                
+                for pbline in priorbuffer.splitlines():
+                    if deviceconnector.wifimessageignore.match(pbline):
                         continue   # filter out boring wifi status messages
                     self.sres('[leftinbuffer] ')
-                    self.sres(str([ur]))
+                    self.sres(str([pbline]))
                     self.sres('\n')
 
         try:
