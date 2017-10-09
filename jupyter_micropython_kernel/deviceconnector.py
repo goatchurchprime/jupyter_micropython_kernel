@@ -225,17 +225,17 @@ class DeviceConnector:
 
                 elif rline == b'Type "help()" for more information.\r\n':
                     brebootdetected = True
-                    self.sres(rline.decode())
+                    self.sres(rline.decode(), n04count=n04count)
                     
                 elif rline == b'>':
                     indexprevgreaterthansign = i
-                    self.sres('>')
+                    self.sres('>', n04count=n04count)
                     
                 # looks for ">>> "
                 elif rline == b' ' and brebootdetected and indexprevgreaterthansign == i-1: 
                     self.sres("[reboot detected %d]" % n04count)
                     self.enterpastemode()  # this is unintentionally recursive, but after a reboot has been seen we need to get into paste mode
-                    self.sres(' ')
+                    self.sres(' ', n04count=n04count)
                     break
                     
                 # normal processing of the string of bytes that have come in
@@ -245,11 +245,7 @@ class DeviceConnector:
                     except UnicodeDecodeError:
                         ur = str(rline)
                     if not wifimessageignore.match(ur):
-                        if n04count == 1 and (i == index04line+1):
-                            self.sres("\n")
-                            self.sres(ur, 1)
-                        else:
-                            self.sres(ur)
+                        self.sres(ur, n04count=n04count)
         
             # else on the for-loop, means the generator has ended at a stop iteration
             # this happens with Keyboard interrupt, and generator needs to be rebuilt
@@ -268,7 +264,8 @@ class DeviceConnector:
             sswrite("O=open({}, '{}')\r\n".format(repr(destinationfilename), fmodifier).encode())
             if bbinary:
                 chunksize = 30
-                for i in range(int(len(filecontents)/chunksize)+1):
+                nchunks = int(len(filecontents)/chunksize)
+                for i in range(nchunks+1):
                     bchunk = filecontents[i*chunksize:(i+1)*chunksize]
                     sswrite(b'O.write(O6("')
                     sswrite(base64.encodebytes(bchunk)[:-1])
@@ -276,17 +273,18 @@ class DeviceConnector:
                     if (i%10) == 9:
                         sswrite(b'\r\x04')  # intermediate executions
                         self.receivestream(bseekokay=True)
-                        self.sres("{} chunks sent so far\n".format(i+1))
-                self.sres("{} chunks sent done".format(i+1))
+                        self.sres("{}%, chunk {}".format(int((i+1)/(nchunks+1)*100), i+1), clear_output=True)
+                self.sres("Sent {} bytes in {} chunks.".format(len(filecontents), i+1), clear_output=True)
                 
             else:
-                for i, line in enumerate(filecontents.splitlines(True)):
+                lines = filecontents.splitlines(True)
+                for i, line in enumerate(lines):
                     sswrite("O.write({})\r\n".format(repr(line)).encode())
                     if (i%10) == 9:
                         sswrite(b'\r\x04')  # intermediate executions
                         self.receivestream(bseekokay=True)
-                        self.sres("{} lines sent so far\n".format(i+1))
-                self.sres("{} lines sent done".format(i+1))
+                        self.sres("{}%, line {}\n".format(int((i+1)/(len(lines)+1)*100), i+1), clear_output=True)
+                self.sres("Sent {} lines ({} bytes).".format(i+1, len(filecontents)), clear_output=True)
 
             sswrite("O.close()\r\n".encode())
             sswrite(b'\r\x04')

@@ -213,12 +213,15 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == ap_sendtofile.prog:
             apargs = parseap(ap_sendtofile, percentstringargs[1:])
-            if apargs.source == "<<cellcontents>>":
-                filecontents = re.sub("^\s*%sendtofile.*\n(?:[ \r]*\n)?", "", cellcontents)
+            if apargs:
+                if apargs.source == "<<cellcontents>>":
+                    filecontents = re.sub("^\s*%sendtofile.*\n(?:[ \r]*\n)?", "", cellcontents)
+                else:
+                    fname = apargs.source or apargs.destinationfilename
+                    filecontents = open(fname, ("rb" if apargs.b else "r")).read()
+                self.dc.sendtofile(apargs.destinationfilename, apargs.a, apargs.b, filecontents)
             else:
-                fname = apargs.source or apargs.destinationfilename
-                filecontents = open(fname, ("rb" if apargs.b else "r")).read()
-            self.dc.sendtofile(apargs.destinationfilename, apargs.a, apargs.b, filecontents)
+                self.sres(ap_sendtofile.format_usage())
             return None
 
         self.sres("Unrecognized percentline {}\n".format([percentline]), 31)
@@ -268,11 +271,13 @@ class MicroPythonKernel(Kernel):
             self.runnormalcell(cellcontents, bsuppressendcode)
             
     # 1=bold, 31=red, 32=green, 34=blue; from http://ascii-table.com/ansi-escape-sequences.php
-    def sres(self, output, asciigraphicscode=None):
+    def sres(self, output, asciigraphicscode=None, n04count=0, clear_output=False):
         if not self.silent:
+            if clear_output:
+                self.send_response(self.iopub_socket, 'clear_output', {"wait":True})
             if asciigraphicscode:
                 output = "\x1b[{}m{}\x1b[0m".format(asciigraphicscode, output)
-            stream_content = {'name': 'stdout', 'text': output}
+            stream_content = {'name': ("stdout" if n04count == 0 else "stderr"), 'text': output }
             self.send_response(self.iopub_socket, 'stream', stream_content)
 
     def do_execute(self, code, silent, store_history=True, user_expressions=None, allow_stdin=False):
