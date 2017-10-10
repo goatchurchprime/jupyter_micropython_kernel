@@ -14,8 +14,8 @@ import argparse, shlex
 
 ap_serialconnect = argparse.ArgumentParser(prog="%serialconnect", add_help=False)
 ap_serialconnect.add_argument('--raw', help='Just open connection', action='store_true')
-ap_serialconnect.add_argument('portname', type=str, default=0, nargs="?")
-ap_serialconnect.add_argument('baudrate', type=int, default=115200, nargs="?")
+ap_serialconnect.add_argument('--port', type=str, default=0)
+ap_serialconnect.add_argument('--baud', type=int, default=115200)
 
 ap_socketconnect = argparse.ArgumentParser(prog="%socketconnect", add_help=False)
 ap_socketconnect.add_argument('--raw', help='Just open connection', action='store_true')
@@ -34,8 +34,13 @@ ap_writebytes.add_argument('stringtosend', type=str)
 ap_sendtofile = argparse.ArgumentParser(prog="%sendtofile", description="send a file to the microcontroller's file system", add_help=False)
 ap_sendtofile.add_argument('-a', help='append', action='store_true')
 ap_sendtofile.add_argument('-b', help='binary', action='store_true')
-ap_sendtofile.add_argument('destinationfilename', type=str)
+ap_sendtofile.add_argument('destinationfilename', type=str, nargs="?")
 ap_sendtofile.add_argument('--source', help="source file", type=str, default="<<cellcontents>>", nargs="?")
+
+ap_esptool = argparse.ArgumentParser(prog="%esptool", add_help=False)
+ap_esptool.add_argument('--port', type=str, default=0)
+ap_esptool.add_argument('espcommand', choices=['erase', 'esp32', 'esp8266'])
+ap_esptool.add_argument('binfile', type=str, nargs="?")
 
 def parseap(ap, percentstringargs1):
     try:
@@ -43,13 +48,11 @@ def parseap(ap, percentstringargs1):
     except SystemExit:  # argparse throws these because it assumes you only want to do the command line
         return None  # should be a default one
         
-# 1. 8266 websocket feature into the main system
-# 2. Complete the implementation of websockets on ESP32
+
+# 2. Complete the implementation of websockets on ESP32  -- nearly there
 # 3. Create the streaming of pulse measurements to a simple javascript frontend and listing
 # 4. Try implementing ESP32 webrepl over these websockets using exec()
-# 5. Include %magic commands for flashing the ESP firmware (defaulting to website if file not listed)
 # 6. Finish debugging the IR codes
-
 
 
 # * upgrade picoweb to handle jpg and png and js
@@ -66,21 +69,6 @@ def parseap(ap, percentstringargs1):
 
 # the socket to ESP32 method could either run exec, or 
 # save to a file, import it, then delete the modele from sys.modules[]
-
-# * potentially run commands to commission the ESP
-#  esptool.py --port /dev/ttyUSB0 erase_flash
-#  esptool.py --port /dev/ttyUSB0 --baud 460800 write_flash --flash_size=detect 0 binaries/esp8266-20170108-v1.8.7.bin --flash_mode dio
-#  esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash -z 0x1000 esp32...
-
-# It looks like we can handle the 8266 webrepl in the following way:
-# import websocket # note no s, so not the asyncio one
-#ws = websocket.create_connection("ws://192.168.4.1:8266/")
-#result = ws.recv()
-#if result == 'Password: ':
-#    ws.send("wpass\r\n")
-#print("Received '%s'" % result)
-#ws.close()
-# and then treat like the serial port
 
 # should also handle shell-scripting other commands, like arpscan for mac address to get to ip-numbers
 
@@ -111,7 +99,7 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == ap_serialconnect.prog:
             apargs = parseap(ap_serialconnect, percentstringargs[1:])
-            self.dc.serialconnect(apargs.portname, apargs.baudrate)
+            self.dc.serialconnect(apargs.port, apargs.baud)
             if self.dc.workingserial:
                 self.sres("\n ** Serial connected **\n\n", 32)
                 self.sres(str(self.dc.workingserial))
@@ -149,15 +137,26 @@ class MicroPythonKernel(Kernel):
                         if not apargs.raw:
                             self.dc.enterpastemode()
             return None
-            
 
+        if percentcommand == ap_esptool.prog:
+            apargs = parseap(ap_esptool, percentstringargs[1:])
+            if apargs or (apargs.espcommand != "erase" and not apargs.binfile):
+                self.dc.esptool(apargs.espcommand, apargs.port, apargs.binfile)
+            else:
+                self.sres(ap_esptool.format_usage())
+                self.sres("Please download the bin file from https://micropython.org/download/#{}".format(apargs.espcommand))
+            return None
+            
         if percentcommand == "%lsmagic":
             self.sres("%disconnect\n    disconnects serial\n\n")
+            self.sres(re.sub("usage: ", "", ap_esptool.format_usage()))
+            self.sres("    commands for flashing your esp-device\n\n")
             self.sres("%lsmagic\n    list magic commands\n\n")
             self.sres("%readbytes\n    does serial.read_all()\n\n")
             self.sres("%rebootdevice\n    reboots device\n\n")
             self.sres(re.sub("usage: ", "", ap_sendtofile.format_usage()))
-            self.sres("    send cell contents or file from disk to device file\n\n")
+            self.sres("    send cell contents or file from disk to device file\n")
+            self.sres("    -a append, -b binary\n\n")
             self.sres(re.sub("usage: ", "", ap_serialconnect.format_usage()))
             self.sres("    connects to a device over USB wire\n\n")
             self.sres(re.sub("usage: ", "", ap_socketconnect.format_usage()))
@@ -213,16 +212,19 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == ap_sendtofile.prog:
             apargs = parseap(ap_sendtofile, percentstringargs[1:])
-            if apargs:
+            cellremains = re.sub("^\s*%sendtofile.*\n(?:[ \r]*\n)?", "", cellcontents)
+            if apargs and not (apargs.source == "<<cellcontents>>" and not apargs.destinationfilename):
                 if apargs.source == "<<cellcontents>>":
-                    filecontents = re.sub("^\s*%sendtofile.*\n(?:[ \r]*\n)?", "", cellcontents)
+                    filecontents = cellremains
+                    cellremains = None
                 else:
-                    fname = apargs.source or apargs.destinationfilename
+                    fname = apargs.source
                     filecontents = open(fname, ("rb" if apargs.b else "r")).read()
-                self.dc.sendtofile(apargs.destinationfilename, apargs.a, apargs.b, filecontents)
+                self.dc.sendtofile(apargs.destinationfilename or apargs.source, apargs.a, apargs.b, filecontents)
             else:
                 self.sres(ap_sendtofile.format_usage())
-            return None
+            return cellremains   # allows for repeat %sendtofile in same cell
+
 
         self.sres("Unrecognized percentline {}\n".format([percentline]), 31)
         return cellcontents
@@ -254,8 +256,10 @@ class MicroPythonKernel(Kernel):
         bsuppressendcode = False  # can't yet see how to get this signal through
         
         # extract any %-commands we have here at the start (or ending?)
-        mpercentline = re.match("\s*(%.*)", cellcontents)
-        if mpercentline:
+        while True:
+            mpercentline = re.match("\s*(%.*)", cellcontents)
+            if not mpercentline:
+                break
             cellcontents = self.interpretpercentline(mpercentline.group(1), cellcontents)
             if cellcontents is None:
                 return

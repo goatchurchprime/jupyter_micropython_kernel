@@ -1,4 +1,4 @@
-import logging, sys, time, os, re, base64
+import logging, sys, time, os, re, base64, subprocess
 import serial, socket, serial.tools.list_ports, select
 import websocket  # the old non async one
 
@@ -184,6 +184,37 @@ class DeviceConnector:
         except websocket.WebSocketException as e:
             self.sres("WebSocketException {}\n".format(str(e)))
 
+
+    def esptool(self, espcommand, portname, binfile):
+        self.disconnect()
+        if type(portname) is int:
+            possibleports = guessserialport()
+            if possibleports:
+                portname = possibleports[portname]
+                if len(possibleports) > 1:
+                    self.sres("Found serial ports {}: \n".format(", ".join(possibleports)))
+            else:
+                self.sres("No possible ports found")
+                portname = ("COM4" if sys.platform == "win32" else "/dev/ttyUSB0")
+
+        pargs = ["esptool.py", "--port", portname]
+        if espcommand == "erase":
+            pargs.append("erase_flash")
+        if espcommand == "esp32":
+            pargs.extend(["--chip", "esp32", "write_flash", "-z", "0x1000"])
+            pargs.append(binfile)
+        if espcommand == "esp8266":
+            pargs.extend(["--baud", "460800", "write_flash", "--flash_size=detect", "0"])
+            pargs.extend(["--flash_mode", "dio"])
+            pargs.append(binfile)
+        self.sres("Executing:\n  {}\n\n".format(" ".join(pargs)))
+        process = subprocess.Popen(pargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for line in process.stdout:
+            self.sres(line.decode())
+        for line in process.stderr:
+            self.sres(line.decode(), n04count=1)
+
+
     def receivestream(self, bseekokay, bwarnokaypriors=True, b5secondtimeout=False):
         n04count = 0
         brebootdetected = False
@@ -278,6 +309,7 @@ class DeviceConnector:
                 
             else:
                 lines = filecontents.splitlines(True)
+                i = -1
                 for i, line in enumerate(lines):
                     sswrite("O.write({})\r\n".format(repr(line)).encode())
                     if (i%10) == 9:
@@ -287,6 +319,7 @@ class DeviceConnector:
                 self.sres("Sent {} lines ({} bytes).".format(i+1, len(filecontents)), clear_output=True)
 
             sswrite("O.close()\r\n".encode())
+            sswrite("del O\r\n".encode())
             sswrite(b'\r\x04')
             self.receivestream(bseekokay=True)
             
