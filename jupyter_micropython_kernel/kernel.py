@@ -32,8 +32,8 @@ ap_writebytes.add_argument('-b', help='binary', action='store_true')
 ap_writebytes.add_argument('stringtosend', type=str)
 
 ap_sendtofile = argparse.ArgumentParser(prog="%sendtofile", description="send a file to the microcontroller's file system", add_help=False)
-ap_sendtofile.add_argument('-a', help='append', action='store_true')
-ap_sendtofile.add_argument('-b', help='binary', action='store_true')
+ap_sendtofile.add_argument('-a', '--append', help='append', action='store_true')
+ap_sendtofile.add_argument('-b', '--binary', help='binary', action='store_true')
 ap_sendtofile.add_argument('destinationfilename', type=str, nargs="?")
 ap_sendtofile.add_argument('--source', help="source file", type=str, default="<<cellcontents>>", nargs="?")
 
@@ -42,12 +42,24 @@ ap_esptool.add_argument('--port', type=str, default=0)
 ap_esptool.add_argument('espcommand', choices=['erase', 'esp32', 'esp8266'])
 ap_esptool.add_argument('binfile', type=str, nargs="?")
 
+ap_capture = argparse.ArgumentParser(prog="%capture", description="capture output printed by device and save to a file", add_help=False)
+ap_capture.add_argument('-q', '--quiet', action='store_true')
+ap_capture.add_argument('outputfilename', type=str)
+
+
 def parseap(ap, percentstringargs1):
     try:
         return ap.parse_known_args(percentstringargs1)[0]
     except SystemExit:  # argparse throws these because it assumes you only want to do the command line
         return None  # should be a default one
         
+
+# Complete streaming of data to file with a quiet mode (listing number of lines)
+# Set this up for pulse reading and plotting in a second jupyter page
+
+# argparse to say --binary in the help for the tag
+
+
 
 # 2. Complete the implementation of websockets on ESP32  -- nearly there
 # 3. Create the streaming of pulse measurements to a simple javascript frontend and listing
@@ -63,9 +75,6 @@ def parseap(ap, percentstringargs1):
 # and access and read that from javascript
 # and get the webserving of webpages (and javascript) also to happen
 
-# %readbytes now looks redundant
-# * record incoming bytes (eg when in enterpastemode) that haven't been printed 
-#    and print them when there is Ctrl-C
 
 # the socket to ESP32 method could either run exec, or 
 # save to a file, import it, then delete the modele from sys.modules[]
@@ -92,6 +101,7 @@ class MicroPythonKernel(Kernel):
         Kernel.__init__(self, **kwargs)
         self.silent = False
         self.dc = deviceconnector.DeviceConnector(self.sres)
+        self.sresoutputfile = None
     
     def interpretpercentline(self, percentline, cellcontents):
         percentstringargs = shlex.split(percentline)
@@ -140,14 +150,16 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == ap_esptool.prog:
             apargs = parseap(ap_esptool, percentstringargs[1:])
-            if apargs or (apargs.espcommand != "erase" and not apargs.binfile):
+            if apargs and (apargs.espcommand == "erase" or apargs.binfile):
                 self.dc.esptool(apargs.espcommand, apargs.port, apargs.binfile)
             else:
-                self.sres(ap_esptool.format_usage())
-                self.sres("Please download the bin file from https://micropython.org/download/#{}".format(apargs.espcommand))
+                self.sres(ap_esptool.format_help())
+                self.sres("Please download the bin file from https://micropython.org/download/#{}".format(apargs.espcommand if apargs else ""))
             return None
-            
+
         if percentcommand == "%lsmagic":
+            self.sres(re.sub("usage: ", "", ap_capture.format_usage()))
+            self.sres("    records output to a file\n\n")
             self.sres("%disconnect\n    disconnects serial\n\n")
             self.sres(re.sub("usage: ", "", ap_esptool.format_usage()))
             self.sres("    commands for flashing your esp-device\n\n")
@@ -176,6 +188,14 @@ class MicroPythonKernel(Kernel):
         
         # remaining commands require a connection
         if not self.dc.serialexists():
+            return cellcontents
+
+        if percentcommand == ap_capture.prog:
+            apargs = parseap(ap_capture, percentstringargs[1:])
+            if apargs:
+                self.sresoutputfile = open(apargs.outputfilename, "w")
+            else:
+                self.sres(ap_capture.format_help())
             return cellcontents
             
         if percentcommand == ap_writebytes.prog:
@@ -212,18 +232,16 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == ap_sendtofile.prog:
             apargs = parseap(ap_sendtofile, percentstringargs[1:])
-            cellremains = re.sub("^\s*%sendtofile.*\n(?:[ \r]*\n)?", "", cellcontents)
-            if apargs and not (apargs.source == "<<cellcontents>>" and not apargs.destinationfilename):
+            if apargs and not (apargs.source == "<<cellcontents>>" and not apargs.destinationfilename) and (apargs.source != None):
                 if apargs.source == "<<cellcontents>>":
-                    filecontents = cellremains
-                    cellremains = None
+                    filecontents = cellcontents
+                    cellcontents = None
                 else:
-                    fname = apargs.source
-                    filecontents = open(fname, ("rb" if apargs.b else "r")).read()
-                self.dc.sendtofile(apargs.destinationfilename or apargs.source, apargs.a, apargs.b, filecontents)
+                    filecontents = open(apargs.source, ("rb" if apargs.binary else "r")).read()
+                self.dc.sendtofile(apargs.destinationfilename or apargs.source, apargs.append, apargs.binary, filecontents)
             else:
                 self.sres(ap_sendtofile.format_usage())
-            return cellremains   # allows for repeat %sendtofile in same cell
+            return cellcontents   # allows for repeat %sendtofile in same cell
 
 
         self.sres("Unrecognized percentline {}\n".format([percentline]), 31)
@@ -255,12 +273,17 @@ class MicroPythonKernel(Kernel):
     def sendcommand(self, cellcontents):
         bsuppressendcode = False  # can't yet see how to get this signal through
         
+        if self.sresoutputfile:
+            self.sresoutputfile.close()
+            self.sres("closing stuck open sresoutputfile\n")
+            self.sresoutputfile = None
+            
         # extract any %-commands we have here at the start (or ending?)
         while True:
-            mpercentline = re.match("\s*(%.*)", cellcontents)
+            mpercentline = re.match("\s*(%.*)\n?(?:[ \r]*\n)?", cellcontents)
             if not mpercentline:
                 break
-            cellcontents = self.interpretpercentline(mpercentline.group(1), cellcontents)
+            cellcontents = self.interpretpercentline(mpercentline.group(1), cellcontents[mpercentline.end():])   # discards the %command and a single blank line (if there is one) from the cell contents
             if cellcontents is None:
                 return
                 
@@ -276,6 +299,8 @@ class MicroPythonKernel(Kernel):
             
     # 1=bold, 31=red, 32=green, 34=blue; from http://ascii-table.com/ansi-escape-sequences.php
     def sres(self, output, asciigraphicscode=None, n04count=0, clear_output=False):
+        if self.sresoutputfile:
+            self.sresoutputfile.write(output)
         if not self.silent:
             if clear_output:
                 self.send_response(self.iopub_socket, 'clear_output', {"wait":True})
@@ -336,6 +361,10 @@ class MicroPythonKernel(Kernel):
                 self.dc.receivestream(bseekokay=False, b5secondtimeout=True)
             return {'status': 'abort', 'execution_count': self.execution_count}
 
+        if self.sresoutputfile:
+            self.sresoutputfile.close()
+            self.sresoutputfile = None
+            
         # everything already gone out with send_response(), but could detect errors (text between the two \x04s
         return {'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {}}
                     
