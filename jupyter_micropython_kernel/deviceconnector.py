@@ -103,23 +103,25 @@ class DeviceConnector:
             self.sres("Selected socket {}  {}\n".format(len(res), len(res[-1])))
         return b"".join(res)
 
-    def disconnect(self):
+    def disconnect(self, raw):
+        if not raw:
+            self.exitpastemode()
         self.workingserialchunk = None
         if self.workingserial is not None:
-            self.sres("Closing serial {}\n".format(str(self.workingserial)))
+            self.sres("\nClosing serial {}\n".format(str(self.workingserial)))
             self.workingserial.close() 
             self.workingserial = None
         if self.workingsocket is not None:
-            self.sres("Closing socket {}\n".format(str(self.workingsocket)))
+            self.sres("\nClosing socket {}\n".format(str(self.workingsocket)))
             self.workingsocket.close() 
             self.workingsocket = None
         if self.workingwebsocket is not None:
-            self.sres("Closing websocket {}\n".format(str(self.workingwebsocket)))
+            self.sres("\nClosing websocket {}\n".format(str(self.workingwebsocket)))
             self.workingwebsocket.close() 
             self.workingwebsocket = None
 
     def serialconnect(self, portname, baudrate):
-        self.disconnect()
+        self.disconnect(False)
 
         if type(portname) is int:
             possibleports = guessserialport()
@@ -152,7 +154,7 @@ class DeviceConnector:
             self.sres("Waited {} seconds for isOpen()\n".format(i*0.01))
         
     def socketconnect(self, ipnumber, portnumber):
-        self.disconnect()
+        self.disconnect(False)
 
         self.sres("Connecting to socket ({} {})\n".format(ipnumber, portnumber))
         s = socket.socket()
@@ -169,7 +171,7 @@ class DeviceConnector:
             
 
     def websocketconnect(self, websocketurl):
-        self.disconnect()
+        self.disconnect(False)
         try:
             self.workingwebsocket = websocket.create_connection(websocketurl, 5)
             self.workingwebsocket.settimeout(serialtimeout)
@@ -186,7 +188,7 @@ class DeviceConnector:
 
 
     def esptool(self, espcommand, portname, binfile):
-        self.disconnect()
+        self.disconnect(True)
         if type(portname) is int:
             possibleports = guessserialport()
             if possibleports:
@@ -326,21 +328,51 @@ class DeviceConnector:
         else:
             self.sres("File transfers implemented for sockets\n")
 
-    def enterpastemode(self):
+    def enterpastemode(self):         # I don't think we ever make a connection and it's still in paste mode (this is revoked on connection break, but I am trying to use exitpastemode to make it better)
         # now sort out connection situation
         if self.workingserial or self.workingwebsocket:
             sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
+            
             sswrite(b'\r\x03\x03')    # ctrl-C: kill off running programs
+            time.sleep(0.1)
             l = self.workingserialreadall()
-            if l:
-                self.sres('[x03x03] ')
+            if l[-6:] == b'\r\n>>> ':
+                self.sres('repl is in normal command mode\n')
+                self.sres('[\\r\\x03\\x03] ')
                 self.sres(str(l))
+            else:
+                self.sres('normal repl mode not detected ')
+                self.sres(str(l))
+                self.sres('\nnot command mode\n')
+                    
+                
             #self.workingserial.write(b'\r\x02')        # ctrl-B: leave paste mode if still in it <-- doesn't work as when not in paste mode it reboots the device
             sswrite(b'\r\x01')        # ctrl-A: enter raw REPL
+            time.sleep(0.1)
+            l = self.workingserialreadall()
+            if l:
+                self.sres('\n[\\r\\x01] ')
+                self.sres(str(l))
             sswrite(b'1\x04')         # single character program to run so receivestream works
         else:
             self.workingsocket.write(b'1\x04')         # single character program to run so receivestream works
         self.receivestream(bseekokay=True, bwarnokaypriors=False)
+        
+    def exitpastemode(self):   # try to make it clean
+        if self.workingserial or self.workingwebsocket:
+            sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
+            try:
+                sswrite(b'\r\x03\x02')    # ctrl-C; ctrl-B to exit paste mode
+                time.sleep(0.1)
+                l = self.workingserialreadall()
+            except serial.SerialException as e:
+                self.sres("serial exceptionon close {}\n".format(str(e)))
+                return
+            
+            self.sres('attempt to exit past mode\n')
+            self.sres('[\\r\\x03\\x02] ')
+            self.sres(str(l))
+        
 
     def writebytes(self, bytestosend):
         if self.workingserial:
