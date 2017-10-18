@@ -150,7 +150,9 @@ class DeviceConnector:
             if self.workingserial.isOpen():
                 break
             time.sleep(0.01)
-        self.sres("  ** connected\n", 32)
+        if verbose:
+            self.sres(" [connected]")
+        self.sres("\n")
         if verbose:
             self.sres(str(self.dc.workingserial))
             self.sres("\n")
@@ -259,7 +261,7 @@ class DeviceConnector:
 
                 elif rline == b'':
                     if b5secondtimeout:
-                        self.sres("[Timed out waiting for recognizable response]\n")
+                        self.sres("[Timed out waiting for recognizable response]\n", 31)
                         return False
                     self.sres(".")  # dot holding position to prove it's alive
 
@@ -298,44 +300,51 @@ class DeviceConnector:
         
 
     def sendtofile(self, destinationfilename, bappend, bbinary, filecontents):
-        if self.workingserial or self.workingwebsocket:
-            sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
-            fmodifier = ("a" if bappend else "w")+("b" if bbinary else "")
-            if bbinary:
-                sswrite(b"import ubinascii; O6 = ubinascii.a2b_base64\r\n")
-            sswrite("O=open({}, '{}')\r\n".format(repr(destinationfilename), fmodifier).encode())
-            if bbinary:
-                chunksize = 30
-                nchunks = int(len(filecontents)/chunksize)
-                for i in range(nchunks+1):
-                    bchunk = filecontents[i*chunksize:(i+1)*chunksize]
-                    sswrite(b'O.write(O6("')
-                    sswrite(base64.encodebytes(bchunk)[:-1])
-                    sswrite(b'"))\r\n')
-                    if (i%10) == 9:
-                        sswrite(b'\r\x04')  # intermediate executions
-                        self.receivestream(bseekokay=True)
-                        self.sres("{}%, chunk {}".format(int((i+1)/(nchunks+1)*100), i+1), clear_output=True)
-                self.sres("Sent {} bytes in {} chunks.".format(len(filecontents), i+1), clear_output=True)
-                
-            else:
-                lines = filecontents.splitlines(True)
-                i = -1
-                for i, line in enumerate(lines):
-                    sswrite("O.write({})\r\n".format(repr(line)).encode())
-                    if (i%10) == 9:
-                        sswrite(b'\r\x04')  # intermediate executions
-                        self.receivestream(bseekokay=True)
-                        self.sres("{}%, line {}\n".format(int((i+1)/(len(lines)+1)*100), i+1), clear_output=True)
-                self.sres("Sent {} lines ({} bytes).".format(i+1, len(filecontents)), clear_output=True)
-
-            sswrite("O.close()\r\n".encode())
-            sswrite("del O\r\n".encode())
-            sswrite(b'\r\x04')
-            self.receivestream(bseekokay=True)
+        if not (self.workingserial or self.workingwebsocket):
+            self.sres("File transfers not implemented for sockets\n", 31)
+            return
+            
+        if not bbinary:
+            lines = filecontents.splitlines(True)
+            maxlinelength = max(map(len, lines), default=0)
+            if maxlinelength > 250:
+                self.sres("Line length {} exceeds maximum for line ascii files, try --binary\n".format(maxlinelength), 31)
+                return
+            
+        sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
+        fmodifier = ("a" if bappend else "w")+("b" if bbinary else "")
+        if bbinary:
+            sswrite(b"import ubinascii; O6 = ubinascii.a2b_base64\r\n")
+        sswrite("O=open({}, '{}')\r\n".format(repr(destinationfilename), fmodifier).encode())
+        if bbinary:
+            chunksize = 30
+            nchunks = int(len(filecontents)/chunksize)
+            for i in range(nchunks+1):
+                bchunk = filecontents[i*chunksize:(i+1)*chunksize]
+                sswrite(b'O.write(O6("')
+                sswrite(base64.encodebytes(bchunk)[:-1])
+                sswrite(b'"))\r\n')
+                if (i%10) == 9:
+                    sswrite(b'\r\x04')  # intermediate executions
+                    self.receivestream(bseekokay=True)
+                    self.sres("{}%, chunk {}".format(int((i+1)/(nchunks+1)*100), i+1), clear_output=True)
+            self.sres("Sent {} bytes in {} chunks.".format(len(filecontents), i+1), clear_output=True)
             
         else:
-            self.sres("File transfers implemented for sockets\n")
+            #lines = filecontents.splitlines(True)
+            i = -1
+            for i, line in enumerate(lines):
+                sswrite("O.write({})\r\n".format(repr(line)).encode())
+                if (i%10) == 9:
+                    sswrite(b'\r\x04')  # intermediate executions
+                    self.receivestream(bseekokay=True)
+                    self.sres("{}%, line {}\n".format(int((i+1)/(len(lines)+1)*100), i+1), clear_output=True)
+            self.sres("Sent {} lines ({} bytes).".format(i+1, len(filecontents)), clear_output=True)
+
+        sswrite("O.close()\r\n".encode())
+        sswrite("del O\r\n".encode())
+        sswrite(b'\r\x04')
+        self.receivestream(bseekokay=True)
 
     def enterpastemode(self, verbose=True):         # I don't think we ever make a connection and it's still in paste mode (this is revoked on connection break, but I am trying to use exitpastemode to make it better)
         # now sort out connection situation

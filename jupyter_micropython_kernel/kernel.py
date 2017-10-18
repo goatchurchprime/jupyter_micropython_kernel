@@ -123,9 +123,9 @@ class MicroPythonKernel(Kernel):
                     if self.dc.enterpastemode(apargs.verbose):
                         self.sres("Ready.")
                     else:
-                        self.sres("Paste mode not working. ")
-                        self.dc.disconnect(apargs.verbose)
-                        self.sres(" ** disconnecting **\n", 31)
+                        self.sres("Disconnecting [paste mode not working]\n", 31)
+                        self.dc.disconnect(raw=True, verbose=apargs.verbose)
+                        self.sres("  (You may need to reset the device)")
             return None
 
         if percentcommand == ap_socketconnect.prog:
