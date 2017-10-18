@@ -16,6 +16,7 @@ ap_serialconnect = argparse.ArgumentParser(prog="%serialconnect", add_help=False
 ap_serialconnect.add_argument('--raw', help='Just open connection', action='store_true')
 ap_serialconnect.add_argument('--port', type=str, default=0)
 ap_serialconnect.add_argument('--baud', type=int, default=115200)
+ap_serialconnect.add_argument('--verbose', action='store_true')
 
 ap_socketconnect = argparse.ArgumentParser(prog="%socketconnect", add_help=False)
 ap_socketconnect.add_argument('--raw', help='Just open connection', action='store_true')
@@ -114,13 +115,17 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == ap_serialconnect.prog:
             apargs = parseap(ap_serialconnect, percentstringargs[1:])
-            self.dc.serialconnect(apargs.port, apargs.baud)
+            
+            self.dc.disconnect(apargs.verbose)
+            self.dc.serialconnect(apargs.port, apargs.baud, apargs.verbose)
             if self.dc.workingserial:
-                self.sres("\n ** Serial connected **\n\n", 32)
-                self.sres(str(self.dc.workingserial))
-                self.sres("\n")
                 if not apargs.raw:
-                    self.dc.enterpastemode()
+                    if self.dc.enterpastemode(apargs.verbose):
+                        self.sres("Ready.")
+                    else:
+                        self.sres("Paste mode not working. ")
+                        self.dc.disconnect(apargs.verbose)
+                        self.sres(" ** disconnecting **\n", 31)
             return None
 
         if percentcommand == ap_socketconnect.prog:
@@ -128,7 +133,8 @@ class MicroPythonKernel(Kernel):
             self.dc.socketconnect(apargs.ipnumber, apargs.portnumber)
             if self.dc.workingsocket:
                 self.sres("\n ** Socket connected **\n\n", 32)
-                self.sres(str(self.dc.workingsocket))
+                if apargs.verbose:
+                    self.sres(str(self.dc.workingsocket))
                 self.sres("\n")
                 #if not apargs.raw:
                 #    self.dc.enterpastemode()
