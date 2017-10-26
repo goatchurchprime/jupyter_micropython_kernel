@@ -1,4 +1,5 @@
 from ipykernel.kernelbase import Kernel
+
 import logging, sys, time, os, re
 import serial, socket, serial.tools.list_ports, select
 from . import deviceconnector
@@ -38,8 +39,9 @@ ap_writebytes.add_argument('stringtosend', type=str)
 ap_sendtofile = argparse.ArgumentParser(prog="%sendtofile", description="send a file to the microcontroller's file system", add_help=False)
 ap_sendtofile.add_argument('--append', '-a', help='append', action='store_true')
 ap_sendtofile.add_argument('--binary', '-b', help='binary', action='store_true')
-ap_sendtofile.add_argument('destinationfilename', type=str, nargs="?")
+ap_sendtofile.add_argument('--execute', '-x', action='store_true')
 ap_sendtofile.add_argument('--source', help="source file", type=str, default="<<cellcontents>>", nargs="?")
+ap_sendtofile.add_argument('destinationfilename', type=str, nargs="?")
 
 ap_esptool = argparse.ArgumentParser(prog="%esptool", add_help=False)
 ap_esptool.add_argument('--port', type=str, default=0)
@@ -280,9 +282,12 @@ class MicroPythonKernel(Kernel):
             if apargs and not (apargs.source == "<<cellcontents>>" and not apargs.destinationfilename) and (apargs.source != None):
                 if apargs.source == "<<cellcontents>>":
                     filecontents = cellcontents
-                    cellcontents = None
+                    if not apargs.execute:
+                        cellcontents = None
                 else:
                     filecontents = open(apargs.source, ("rb" if apargs.binary else "r")).read()
+                    if apargs.execute:
+                        self.sres("Cannot excecute sourced file\n", 31)
                 self.dc.sendtofile(apargs.destinationfilename or apargs.source, apargs.append, apargs.binary, filecontents)
             else:
                 self.sres(ap_sendtofile.format_usage())
@@ -335,6 +340,7 @@ class MicroPythonKernel(Kernel):
         if not self.dc.serialexists():
             self.sres("No serial connected\n", 31)
             self.sres("  %serialconnect to connect\n")
+            self.sres("  %esptool to flash the device\n")
             self.sres("  %lsmagic to list commands")
             return
             
@@ -406,6 +412,10 @@ class MicroPythonKernel(Kernel):
         #    self.sres(self.asyncmodule.before + 'Restarting Bash')
         #    self.startasyncmodule()
 
+        if self.srescapturedoutputfile:
+            self.srescapturedoutputfile.close()
+            self.srescapturedoutputfile = None
+
         if interrupted:
             self.sres("\n\n*** Sending Ctrl-C\n\n")
             if self.dc.serialexists():
@@ -413,11 +423,8 @@ class MicroPythonKernel(Kernel):
                 interrupted = True
                 self.dc.receivestream(bseekokay=False, b5secondtimeout=True)
             return {'status': 'abort', 'execution_count': self.execution_count}
-
-        if self.srescapturedoutputfile:
-            self.srescapturedoutputfile.close()
-            self.srescapturedoutputfile = None
             
         # everything already gone out with send_response(), but could detect errors (text between the two \x04s
+
         return {'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {}}
                     

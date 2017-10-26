@@ -215,8 +215,7 @@ class DeviceConnector:
             pargs.extend(["--chip", "esp32", "write_flash", "-z", "0x1000"])
             pargs.append(binfile)
         if espcommand == "esp8266":
-            pargs.extend(["--baud", "460800", "write_flash", "--flash_size=detect", "0"])
-            pargs.extend(["--flash_mode", "dio"])
+            pargs.extend(["--baud", "460800", "write_flash", "--flash_size=detect", "-fm", "dio", "0"])
             pargs.append(binfile)
         self.sres("Executing:\n  {}\n\n".format(" ".join(pargs)))
         process = subprocess.Popen(pargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
