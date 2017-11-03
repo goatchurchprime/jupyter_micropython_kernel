@@ -2,6 +2,7 @@ from ipykernel.kernelbase import Kernel
 
 import logging, sys, time, os, re
 import serial, socket, serial.tools.list_ports, select
+import websocket  # only for WebSocketConnectionClosedException
 from . import deviceconnector
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,13 @@ ap_sendtofile.add_argument('--append', '-a', help='append', action='store_true')
 ap_sendtofile.add_argument('--binary', '-b', help='binary', action='store_true')
 ap_sendtofile.add_argument('--execute', '-x', action='store_true')
 ap_sendtofile.add_argument('--source', help="source file", type=str, default="<<cellcontents>>", nargs="?")
+ap_sendtofile.add_argument('--quiet', '-q', action='store_true')
+ap_sendtofile.add_argument('--QUIET', '-Q', action='store_true')
 ap_sendtofile.add_argument('destinationfilename', type=str, nargs="?")
+
+ap_mpycross = argparse.ArgumentParser(prog="%mpy-cross", add_help=False)
+ap_mpycross.add_argument('--set-exe', type=str)
+ap_mpycross.add_argument('pyfile', type=str, nargs="?")
 
 ap_esptool = argparse.ArgumentParser(prog="%esptool", add_help=False)
 ap_esptool.add_argument('--port', type=str, default=0)
@@ -110,6 +117,8 @@ class MicroPythonKernel(Kernel):
         self.dc = deviceconnector.DeviceConnector(self.sres)
         self.srescapturedoutputfile = None   # used by %capture command
         self.srescapturedlinecount = 0      # -1 echo lines to screen as well as file, -2 total silence, >=0 update a linecound
+        self.mpycrossexe = None
+        
         
     def interpretpercentline(self, percentline, cellcontents):
         percentstringargs = shlex.split(percentline)
@@ -188,6 +197,22 @@ class MicroPythonKernel(Kernel):
             if not apargs.execute:
                 return None
             return cellcontents # should add in some blank lines at top to get errors right
+
+        if percentcommand == "%mpy-cross":
+            apargs = parseap(ap_mpycross, percentstringargs[1:])
+            if apargs and apargs.set_exe:
+                self.mpycrossexe = apargs.set_exe
+            elif apargs.pyfile:
+                if self.mpycrossexe:
+                    self.dc.mpycross(self.mpycrossexe, apargs.pyfile)
+                else:
+                    self.sres("Cross compiler executable not yet set\n", 31)
+                    self.sres("try: %mpy-cross --set-exe /home/julian/extrepositories/micropython/mpy-cross/mpy-cross\n")
+                if self.mpycrossexe:
+                    self.mpycrossexe = "/home/julian/extrepositories/micropython/mpy-cross/mpy-cross"
+            else:
+                self.sres(ap_mpycross.format_help())
+            return cellcontents.strip() and cellcontents or None
             
         if percentcommand == "%lsmagic":
             self.sres(re.sub("usage: ", "", ap_capture.format_usage()))
@@ -197,6 +222,8 @@ class MicroPythonKernel(Kernel):
             self.sres(re.sub("usage: ", "", ap_esptool.format_usage()))
             self.sres("    commands for flashing your esp-device\n\n")
             self.sres("%lsmagic\n    list magic commands\n\n")
+            self.sres(re.sub("usage: ", "", ap_mpycross.format_usage()))
+            self.sres("    cross-compile a .py file to a .mpy file\n\n")
             self.sres("%readbytes\n    does serial.read_all()\n\n")
             self.sres("%rebootdevice\n    reboots device\n\n")
             self.sres(re.sub("usage: ", "", ap_sendtofile.format_usage()))
@@ -288,7 +315,7 @@ class MicroPythonKernel(Kernel):
                     filecontents = open(apargs.source, ("rb" if apargs.binary else "r")).read()
                     if apargs.execute:
                         self.sres("Cannot excecute sourced file\n", 31)
-                self.dc.sendtofile(apargs.destinationfilename or apargs.source, apargs.append, apargs.binary, filecontents)
+                self.dc.sendtofile(apargs.destinationfilename or apargs.source, apargs.append, apargs.binary, apargs.quiet, filecontents)
             else:
                 self.sres(ap_sendtofile.format_usage())
             return cellcontents   # allows for repeat %sendtofile in same cell
@@ -385,6 +412,10 @@ class MicroPythonKernel(Kernel):
             except OSError as e:
                 priorbuffer = []
                 self.sres("\n\n***Connecton broken [%s]\n" % str(e.strerror), 31)
+                self.sres("You may need to reconnect")
+            except websocket.WebSocketConnectionClosedException as e:
+                priorbuffer = []
+                self.sres("\n\n***Websocket connecton broken [%s]\n" % str(e.strerror), 31)
                 self.sres("You may need to reconnect")
                 
             if priorbuffer:

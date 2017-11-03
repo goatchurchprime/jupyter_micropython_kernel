@@ -224,6 +224,14 @@ class DeviceConnector:
         for line in process.stderr:
             self.sres(line.decode(), n04count=1)
 
+    def mpycross(self, mpycrossexe, pyfile):
+        pargs = [mpycrossexe, pyfile]
+        self.sres("Executing:  {}\n".format(" ".join(pargs)))
+        process = subprocess.Popen(pargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for line in process.stdout:
+            self.sres(line.decode())
+        for line in process.stderr:
+            self.sres(line.decode(), n04count=1)
 
     def receivestream(self, bseekokay, bwarnokaypriors=True, b5secondtimeout=False):
         n04count = 0
@@ -298,7 +306,7 @@ class DeviceConnector:
         return True
         
 
-    def sendtofile(self, destinationfilename, bappend, bbinary, filecontents):
+    def sendtofile(self, destinationfilename, bappend, bbinary, bquiet, filecontents):
         if not (self.workingserial or self.workingwebsocket):
             self.sres("File transfers not implemented for sockets\n", 31)
             return
@@ -326,8 +334,9 @@ class DeviceConnector:
                 if (i%10) == 9:
                     sswrite(b'\r\x04')  # intermediate executions
                     self.receivestream(bseekokay=True)
-                    self.sres("{}%, chunk {}".format(int((i+1)/(nchunks+1)*100), i+1), clear_output=True)
-            self.sres("Sent {} bytes in {} chunks.".format(len(filecontents), i+1), clear_output=True)
+                    if not bquiet:
+                        self.sres("{}%, chunk {}".format(int((i+1)/(nchunks+1)*100), i+1), clear_output=True)
+            self.sres("Sent {} bytes in {} chunks.".format(len(filecontents), i+1), clear_output=not bquiet)
             
         else:
             #lines = filecontents.splitlines(True)

@@ -2,27 +2,35 @@
 
 Jupyter kernel to interact with a MicroPython ESP8266 or ESP32 over its serial REPL.  
 
+Also with capabilities to work through the WEBREPL (available on ESP8266 only), 
+do Ctrl-C, transfer files and esptools flashing. 
+
 ## Installation
 
 First install Jupyter: http://jupyter.org/install.html (the Python3 version)
 
-Then clone this repository to a directory.
+Then clone this repository to a directory using TortoiseGIT or with the shell command:
 
-Install this library (in editable mode) into Python3
+    git clone https://github.com/goatchurchprime/jupyter_micropython_kernel.git
+
+Install this library (in editable mode) into Python3 using the shell command:
 
     pip install -e jupyter_micropython_kernel
 
-(This creates a small file pointing to this directory in the python/../site-packages 
-directory, and makes it possible to "git update" the library later as it gets improved)
-    
-Install the kernel into jupyter itself    
+This creates a small file pointing to this directory in the python/../site-packages 
+directory, and makes it possible to "git update" the library later as it gets improved.
+(Things can go wrong here, and you might need "pip3" or "sudo pip" if you have 
+numerous different versions of python installed
+
+
+Install the kernel into jupyter itself using the shell command:
 
     python -m jupyter_micropython_kernel.install
 
 (This creates the small file ".local/share/jupyter/kernels/micropython/kernel.json" 
 that jupyter uses to reference it's kernels
 
-To find out where your kernelspecs are stored, type:
+To find out where your kernelspecs are stored, you can type:
 
     jupyter kernelspec list
 
@@ -66,6 +74,9 @@ and recover some memory) type:
 Note: Restarting the kernel does not actually reboot the device.  
 Also, pressing the reset button will probably mess things up, because 
 this interface relies on the ctrl-A non-echoing paste mode to do its stuff.
+
+You can list all the functions with:
+    %lsmagic
 
 
 ## Debugging
@@ -111,6 +122,7 @@ Other known projects that have implemented a Jupyter Micropython kernel are:
 * https://github.com/willingc/circuitpython_kernel
 * https://github.com/TDAbboud/mpkernel
 * https://github.com/takluyver/ubit_kernel
+* https://github.com/jneines/nodemcu_kernel
 
 In my defence, this is not an effect of not-invented-here syndrome; I did not discover most of these 
 other projects until I had mostly written this one.  
