@@ -32,6 +32,7 @@ ap_websocketconnect = argparse.ArgumentParser(prog="%websocketconnect", add_help
 ap_websocketconnect.add_argument('--raw', help='Just open connection', action='store_true')
 ap_websocketconnect.add_argument('websocketurl', type=str, default="ws://192.168.4.1:8266", nargs="?")
 ap_websocketconnect.add_argument("--password", type=str)
+ap_websocketconnect.add_argument('--verbose', action='store_true')
 
 ap_writebytes = argparse.ArgumentParser(prog="%writebytes", add_help=False)
 ap_writebytes.add_argument('--binary', '-b', action='store_true')
@@ -132,24 +133,15 @@ class MicroPythonKernel(Kernel):
             if self.dc.workingserial:
                 if not apargs.raw:
                     if self.dc.enterpastemode(apargs.verbose):
-                        self.sres("Ready.")
+                        self.sres("Ready.\n\n")
                     else:
                         self.sres("Disconnecting [paste mode not working]\n", 31)
                         self.dc.disconnect(raw=True, verbose=apargs.verbose)
                         self.sres("  (You may need to reset the device)")
-            return None
-
-        if percentcommand == ap_socketconnect.prog:
-            apargs = parseap(ap_socketconnect, percentstringargs[1:])
-            self.dc.socketconnect(apargs.ipnumber, apargs.portnumber)
-            if self.dc.workingsocket:
-                self.sres("\n ** Socket connected **\n\n", 32)
-                if apargs.verbose:
-                    self.sres(str(self.dc.workingsocket))
-                self.sres("\n")
-                #if not apargs.raw:
-                #    self.dc.enterpastemode()
-            return None
+                        cellcontents = ""
+            else:
+                cellcontents = ""
+            return cellcontents.strip() and cellcontents or None
 
         if percentcommand == ap_websocketconnect.prog:
             apargs = parseap(ap_websocketconnect, percentstringargs[1:])
@@ -167,8 +159,29 @@ class MicroPythonKernel(Kernel):
                         res = self.dc.workingserialreadall()
                         self.sres(res)  # '\r\nWebREPL connected\r\n>>> '
                         if not apargs.raw:
-                            self.dc.enterpastemode()
-            return None
+                            if self.dc.enterpastemode(apargs.verbose):
+                                self.sres("Ready.\n\n")
+                            else:
+                                self.sres("Disconnecting [paste mode not working]\n", 31)
+                                self.dc.disconnect(raw=True, verbose=apargs.verbose)
+                                self.sres("  (You may need to reset the device)")
+                                cellcontents = ""
+            else:
+                cellcontents = ""
+            return cellcontents.strip() and cellcontents or None
+
+        # this is the direct socket kind, not attached to a webrepl
+        if percentcommand == ap_socketconnect.prog:   
+            apargs = parseap(ap_socketconnect, percentstringargs[1:])
+            self.dc.socketconnect(apargs.ipnumber, apargs.portnumber)
+            if self.dc.workingsocket:
+                self.sres("\n ** Socket connected **\n\n", 32)
+                if apargs.verbose:
+                    self.sres(str(self.dc.workingsocket))
+                self.sres("\n")
+                #if not apargs.raw:
+                #    self.dc.enterpastemode()
+            return cellcontents.strip() and cellcontents or None
 
         if percentcommand == ap_esptool.prog:
             apargs = parseap(ap_esptool, percentstringargs[1:])
@@ -177,7 +190,7 @@ class MicroPythonKernel(Kernel):
             else:
                 self.sres(ap_esptool.format_help())
                 self.sres("Please download the bin file from https://micropython.org/download/#{}".format(apargs.espcommand if apargs else ""))
-            return None
+            return cellcontents.strip() and cellcontents or None
 
         if percentcommand == ap_writefilepc.prog:
             apargs = parseap(ap_writefilepc, percentstringargs[1:])
@@ -214,9 +227,13 @@ class MicroPythonKernel(Kernel):
                 self.sres(ap_mpycross.format_help())
             return cellcontents.strip() and cellcontents or None
             
+        if percentcommand == "%comment":
+            return cellcontents.strip() and cellcontents or None
+            
         if percentcommand == "%lsmagic":
             self.sres(re.sub("usage: ", "", ap_capture.format_usage()))
             self.sres("    records output to a file\n\n")
+            self.sres("%comment\n    ignore this line\n\n")
             self.sres(re.sub("usage: ", "", ap_disconnect.format_usage()))
             self.sres("    disconnects from web/serial connection\n\n")
             self.sres(re.sub("usage: ", "", ap_esptool.format_usage()))

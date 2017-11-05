@@ -336,18 +336,21 @@ class DeviceConnector:
                     self.receivestream(bseekokay=True)
                     if not bquiet:
                         self.sres("{}%, chunk {}".format(int((i+1)/(nchunks+1)*100), i+1), clear_output=True)
-            self.sres("Sent {} bytes in {} chunks.".format(len(filecontents), i+1), clear_output=not bquiet)
+            self.sres("Sent {} bytes in {} chunks.\n".format(len(filecontents), i+1), clear_output=not bquiet)
             
         else:
             #lines = filecontents.splitlines(True)
             i = -1
+            #if bappend:
+            #    sswrite("O.write('\n')\r\n".encode())   # avoid line concattenation on appends
             for i, line in enumerate(lines):
                 sswrite("O.write({})\r\n".format(repr(line)).encode())
                 if (i%10) == 9:
                     sswrite(b'\r\x04')  # intermediate executions
                     self.receivestream(bseekokay=True)
-                    self.sres("{}%, line {}\n".format(int((i+1)/(len(lines)+1)*100), i+1), clear_output=True)
-            self.sres("Sent {} lines ({} bytes).".format(i+1, len(filecontents)), clear_output=True)
+                    if not bquiet:
+                        self.sres("{}%, line {}\n".format(int((i+1)/(len(lines)+1)*100), i+1), clear_output=True)
+            self.sres("Sent {} lines ({} bytes).\n".format(i+1, len(filecontents)), clear_output=not bquiet)
 
         sswrite("O.close()\r\n".encode())
         sswrite("del O\r\n".encode())
