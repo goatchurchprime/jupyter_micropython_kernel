@@ -306,11 +306,11 @@ class DeviceConnector:
         return True
         
 
-    def sendtofile(self, destinationfilename, bappend, bbinary, bquiet, filecontents):
+    def sendtofile(self, destinationfilename, bmkdir, bappend, bbinary, bquiet, filecontents):
         if not (self.workingserial or self.workingwebsocket):
             self.sres("File transfers not implemented for sockets\n", 31)
             return
-            
+        
         if not bbinary:
             lines = filecontents.splitlines(True)
             maxlinelength = max(map(len, lines), default=0)
@@ -319,6 +319,15 @@ class DeviceConnector:
                 return
             
         sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
+        
+        if bmkdir:
+            dseq = [ d  for d in destinationfilename.split("/")[:-1]  if d]
+            if dseq:
+                sswrite(b'import os\r\n')
+                for i in range(len(dseq)):
+                    sswrite('try:  os.mkdir({})\r\n'.format(repr("/".join(dseq[:i+1]))).encode())
+                    sswrite(b'except OSError:  pass\r\n')            
+        
         fmodifier = ("a" if bappend else "w")+("b" if bbinary else "")
         if bbinary:
             sswrite(b"import ubinascii; O6 = ubinascii.a2b_base64\r\n")
@@ -339,10 +348,9 @@ class DeviceConnector:
             self.sres("Sent {} bytes in {} chunks.\n".format(len(filecontents), i+1), clear_output=not bquiet)
             
         else:
-            #lines = filecontents.splitlines(True)
             i = -1
-            #if bappend:
-            #    sswrite("O.write('\n')\r\n".encode())   # avoid line concattenation on appends
+            if bappend:
+                sswrite("O.write('\\n')\r\n".encode())   # avoid line concattenation on appends
             for i, line in enumerate(lines):
                 sswrite("O.write({})\r\n".format(repr(line)).encode())
                 if (i%10) == 9:

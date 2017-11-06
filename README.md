@@ -3,7 +3,9 @@
 Jupyter kernel to interact with a MicroPython ESP8266 or ESP32 over its serial REPL.  
 
 Also with capabilities to work through the WEBREPL (available on ESP8266 only), 
-do Ctrl-C, transfer files and esptools flashing. 
+do Ctrl-C, transfer files and esptools flashing.  
+See https://github.com/goatchurchprime/jupyter_micropython_developer_notebooks 
+for examples.
 
 ## Installation
 

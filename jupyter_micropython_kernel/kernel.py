@@ -39,8 +39,9 @@ ap_writebytes.add_argument('--binary', '-b', action='store_true')
 ap_writebytes.add_argument('stringtosend', type=str)
 
 ap_sendtofile = argparse.ArgumentParser(prog="%sendtofile", description="send a file to the microcontroller's file system", add_help=False)
-ap_sendtofile.add_argument('--append', '-a', help='append', action='store_true')
-ap_sendtofile.add_argument('--binary', '-b', help='binary', action='store_true')
+ap_sendtofile.add_argument('--append', '-a', action='store_true')
+ap_sendtofile.add_argument('--mkdir', '-d', action='store_true')
+ap_sendtofile.add_argument('--binary', '-b', action='store_true')
 ap_sendtofile.add_argument('--execute', '-x', action='store_true')
 ap_sendtofile.add_argument('--source', help="source file", type=str, default="<<cellcontents>>", nargs="?")
 ap_sendtofile.add_argument('--quiet', '-q', action='store_true')
@@ -332,7 +333,7 @@ class MicroPythonKernel(Kernel):
                     filecontents = open(apargs.source, ("rb" if apargs.binary else "r")).read()
                     if apargs.execute:
                         self.sres("Cannot excecute sourced file\n", 31)
-                self.dc.sendtofile(apargs.destinationfilename or apargs.source, apargs.append, apargs.binary, apargs.quiet, filecontents)
+                self.dc.sendtofile(apargs.destinationfilename or apargs.source, apargs.mkdir, apargs.append, apargs.binary, apargs.quiet, filecontents)
             else:
                 self.sres(ap_sendtofile.format_usage())
             return cellcontents   # allows for repeat %sendtofile in same cell
