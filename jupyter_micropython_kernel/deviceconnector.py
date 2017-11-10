@@ -345,7 +345,7 @@ class DeviceConnector:
                     self.receivestream(bseekokay=True)
                     if not bquiet:
                         self.sres("{}%, chunk {}".format(int((i+1)/(nchunks+1)*100), i+1), clear_output=True)
-            self.sres("Sent {} bytes in {} chunks.\n".format(len(filecontents), i+1), clear_output=not bquiet)
+            self.sres("Sent {} bytes in {} chunks to {}.\n".format(len(filecontents), i+1, destinationfilename), clear_output=not bquiet)
             
         else:
             i = -1
@@ -358,7 +358,7 @@ class DeviceConnector:
                     self.receivestream(bseekokay=True)
                     if not bquiet:
                         self.sres("{}%, line {}\n".format(int((i+1)/(len(lines)+1)*100), i+1), clear_output=True)
-            self.sres("Sent {} lines ({} bytes).\n".format(i+1, len(filecontents)), clear_output=not bquiet)
+            self.sres("Sent {} lines ({} bytes) to {}.\n".format(i+1, len(filecontents), destinationfilename), clear_output=not bquiet)
 
         sswrite("O.close()\r\n".encode())
         sswrite("del O\r\n".encode())
@@ -412,7 +412,7 @@ class DeviceConnector:
                 return
             
             if verbose:
-                self.sres('attempt to exit past mode\n')
+                self.sres('attempt to exit paste mode\n')
                 self.sres('[\\r\\x03\\x02] ')
                 self.sres(str(l))
         
@@ -420,13 +420,13 @@ class DeviceConnector:
     def writebytes(self, bytestosend):
         if self.workingserial:
             nbyteswritten = self.workingserial.write(bytestosend)
-            return ("serial.write {} bytes to {} at baudrate {}".format(nbyteswritten, self.workingserial.port, self.workingserial.baudrate))
+            return ("serial.write {} bytes to {} at baudrate {}\n".format(nbyteswritten, self.workingserial.port, self.workingserial.baudrate))
         elif self.workingwebsocket:
             nbyteswritten = self.workingwebsocket.send(bytestosend)
-            return ("serial.write {} bytes to {}".format(nbyteswritten, "websocket"))
+            return ("serial.write {} bytes to {}\n".format(nbyteswritten, "websocket"))
         else:
             nbyteswritten = self.workingsocket.write(bytestosend)
-            return ("serial.write {} bytes to {}".format(nbyteswritten, str(self.workingsocket)))
+            return ("serial.write {} bytes to {}\n".format(nbyteswritten, str(self.workingsocket)))
 
     def sendrebootmessage(self):
         if self.workingserial:

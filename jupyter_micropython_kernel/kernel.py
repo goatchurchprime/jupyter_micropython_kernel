@@ -146,6 +146,9 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == ap_websocketconnect.prog:
             apargs = parseap(ap_websocketconnect, percentstringargs[1:])
+            if apargs.password is None:
+                self.sres("requires --password setting\n")
+                return None
             self.dc.websocketconnect(apargs.websocketurl)
             if self.dc.workingwebsocket: 
                 self.sres("\n ** WebSocket connected **\n\n", 32)
@@ -286,17 +289,18 @@ class MicroPythonKernel(Kernel):
             apargs = parseap(ap_writebytes, percentstringargs[1:])
             bytestosend = apargs.stringtosend.encode().decode("unicode_escape").encode()
             self.sres(self.dc.writebytes(bytestosend))
-            return None
+            return cellcontents.strip() and cellcontents or None
             
         if percentcommand == "%readbytes":
+            time.sleep(0.1)   # just give it a moment if running on from a series of values (could use an --expect keyword)
             l = self.dc.workingserialreadall()
-            self.sres(str([l]))
-            return None
+            self.sres("{}\n".format(str([l])))
+            return cellcontents.strip() and cellcontents or None
             
         if percentcommand == "%rebootdevice":
             self.dc.sendrebootmessage()
             self.dc.enterpastemode()
-            return None
+            return cellcontents.strip() and cellcontents or None
             
         if percentcommand == "%reboot":
             self.sres("Did you mean %rebootdevice?\n", 31)
@@ -333,7 +337,12 @@ class MicroPythonKernel(Kernel):
                     filecontents = open(apargs.source, ("rb" if apargs.binary else "r")).read()
                     if apargs.execute:
                         self.sres("Cannot excecute sourced file\n", 31)
-                self.dc.sendtofile(apargs.destinationfilename or apargs.source, apargs.mkdir, apargs.append, apargs.binary, apargs.quiet, filecontents)
+                destinationfilename = apargs.destinationfilename
+                if not destinationfilename:
+                    destinationfilename = os.path.split(apargs.source)[1]
+                elif destinationfilename[-1] == "/":
+                    destinationfilename += os.path.split(apargs.source)[1]
+                self.dc.sendtofile(destinationfilename, apargs.mkdir, apargs.append, apargs.binary, apargs.quiet, filecontents)
             else:
                 self.sres(ap_sendtofile.format_usage())
             return cellcontents   # allows for repeat %sendtofile in same cell
@@ -421,7 +430,7 @@ class MicroPythonKernel(Kernel):
         interrupted = False
         
         # clear buffer out before executing any commands (except the readbytes one)
-        if self.dc.serialexists() and not re.match("%readbytes", code):
+        if self.dc.serialexists() and not re.match("\s*%readbytes|\s*%disconnect|\s*serialconnect|\s*websocketconnect", code):
             priorbuffer = None
             try:
                 priorbuffer = self.dc.workingserialreadall()
@@ -429,11 +438,11 @@ class MicroPythonKernel(Kernel):
                 interrupted = True
             except OSError as e:
                 priorbuffer = []
-                self.sres("\n\n***Connecton broken [%s]\n" % str(e.strerror), 31)
+                self.sres("\n\n***Connection broken [%s]\n" % str(e.strerror), 31)
                 self.sres("You may need to reconnect")
             except websocket.WebSocketConnectionClosedException as e:
                 priorbuffer = []
-                self.sres("\n\n***Websocket connecton broken [%s]\n" % str(e.strerror), 31)
+                self.sres("\n\n***Websocket connection broken [%s]\n" % str(e.strerror), 31)
                 self.sres("You may need to reconnect")
                 
             if priorbuffer:
@@ -470,7 +479,12 @@ class MicroPythonKernel(Kernel):
             if self.dc.serialexists():
                 self.dc.writebytes(b'\r\x03')
                 interrupted = True
-                self.dc.receivestream(bseekokay=False, b5secondtimeout=True)
+                try:
+                    self.dc.receivestream(bseekokay=False, b5secondtimeout=True)
+                except KeyboardInterrupt:
+                    self.sres("\n\nKeyboard interrupt while waiting response on Ctrl-C\n\n" % str(e.strerror))
+                except OSError as e:
+                    self.sres("\n\n***OSError while issuing a Ctrl-C [%s]\n\n" % str(e.strerror))
             return {'status': 'abort', 'execution_count': self.execution_count}
             
         # everything already gone out with send_response(), but could detect errors (text between the two \x04s

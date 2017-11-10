@@ -56,8 +56,14 @@ you connect to your MicroPython/ESP8266 with.
 You should now be able to execute MicroPython commands 
 by running the cells.
 
-(There is a micropythondemo.ipynb file in the directory you could 
-look at with some of the features shown.)
+'''On Windows it can sometimes be difficult to find the Serial (COM-port) 
+and the right driver.  This is not unique to the jupyter_micropython_kernel
+and is a function of the USB chip that is on the breakout board containing 
+your ESP32/ESP8266.  Find the USB connection in the Device list to see what driver 
+it needs or look for instructions from the supplier of the board.'''
+
+There is a micropythondemo.ipynb file in the directory you could 
+look at with some of the features shown.
 
 If a cell is taking too long to interrupt, it may respond 
 to a "Kernel" -> "Interrupt" command. 
