@@ -116,7 +116,7 @@ class MicroPythonKernel(Kernel):
     def __init__(self, **kwargs):
         Kernel.__init__(self, **kwargs)
         self.silent = False
-        self.dc = deviceconnector.DeviceConnector(self.sres)
+        self.dc = deviceconnector.DeviceConnector(self.sres, self.sresSYS)
         self.srescapturedoutputfile = None   # used by %capture command
         self.srescapturedlinecount = 0      # -1 echo lines to screen as well as file, -2 total silence, >=0 update a linecound
         self.mpycrossexe = None
@@ -133,12 +133,12 @@ class MicroPythonKernel(Kernel):
             self.dc.serialconnect(apargs.port, apargs.baud, apargs.verbose)
             if self.dc.workingserial:
                 if not apargs.raw:
-                    if self.dc.enterpastemode(apargs.verbose):
-                        self.sres("Ready.\n\n")
+                    if self.dc.enterpastemode(verbose=apargs.verbose):
+                        self.sresSYS("Ready.\n")
                     else:
                         self.sres("Disconnecting [paste mode not working]\n", 31)
-                        self.dc.disconnect(raw=True, verbose=apargs.verbose)
-                        self.sres("  (You may need to reset the device)")
+                        self.dc.disconnect(verbose=apargs.verbose)
+                        self.sresSYS("  (You may need to reset the device)")
                         cellcontents = ""
             else:
                 cellcontents = ""
@@ -147,11 +147,11 @@ class MicroPythonKernel(Kernel):
         if percentcommand == ap_websocketconnect.prog:
             apargs = parseap(ap_websocketconnect, percentstringargs[1:])
             if apargs.password is None:
-                self.sres("requires --password setting\n")
+                self.sresSYS("requires --password setting\n")
                 return None
             self.dc.websocketconnect(apargs.websocketurl)
             if self.dc.workingwebsocket: 
-                self.sres("\n ** WebSocket connected **\n\n", 32)
+                self.sresSYS("\n ** WebSocket connected **\n\n", 32)
                 self.sres(str(self.dc.workingwebsocket))
                 self.sres("\n")
                 if not apargs.raw:
@@ -164,10 +164,10 @@ class MicroPythonKernel(Kernel):
                         self.sres(res)  # '\r\nWebREPL connected\r\n>>> '
                         if not apargs.raw:
                             if self.dc.enterpastemode(apargs.verbose):
-                                self.sres("Ready.\n\n")
+                                self.sresSYS("Ready.\n")
                             else:
                                 self.sres("Disconnecting [paste mode not working]\n", 31)
-                                self.dc.disconnect(raw=True, verbose=apargs.verbose)
+                                self.dc.disconnect(verbose=apargs.verbose)
                                 self.sres("  (You may need to reset the device)")
                                 cellcontents = ""
             else:
@@ -248,7 +248,7 @@ class MicroPythonKernel(Kernel):
             self.sres("%readbytes\n    does serial.read_all()\n\n")
             self.sres("%rebootdevice\n    reboots device\n\n")
             self.sres(re.sub("usage: ", "", ap_sendtofile.format_usage()))
-            self.sres("    send cell contents or file from disk to device file\n\n")
+            self.sres("    send cell contents or file from disk to device file or directory\n\n")
             self.sres(re.sub("usage: ", "", ap_serialconnect.format_usage()))
             self.sres("    connects to a device over USB wire\n\n")
             self.sres(re.sub("usage: ", "", ap_socketconnect.format_usage()))
@@ -267,7 +267,7 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == ap_disconnect.prog:
             apargs = parseap(ap_disconnect, percentstringargs[1:])
-            self.dc.disconnect(apargs and apargs.raw)
+            self.dc.disconnect(verbose=True)
             return None
         
         # remaining commands require a connection
@@ -402,6 +402,8 @@ class MicroPythonKernel(Kernel):
         if cellcontents:
             self.runnormalcell(cellcontents, bsuppressendcode)
             
+    def sresSYS(self, output, clear_output=False):   # system call
+        self.sres(output, asciigraphicscode=34, clear_output=clear_output)
     # 1=bold, 31=red, 32=green, 34=blue; from http://ascii-table.com/ansi-escape-sequences.php
     def sres(self, output, asciigraphicscode=None, n04count=0, clear_output=False):
         if self.silent:
@@ -430,7 +432,7 @@ class MicroPythonKernel(Kernel):
         interrupted = False
         
         # clear buffer out before executing any commands (except the readbytes one)
-        if self.dc.serialexists() and not re.match("\s*%readbytes|\s*%disconnect|\s*serialconnect|\s*websocketconnect", code):
+        if self.dc.serialexists() and not re.match("\s*%readbytes|\s*%disconnect|\s*%serialconnect|\s*websocketconnect", code):
             priorbuffer = None
             try:
                 priorbuffer = self.dc.workingserialreadall()
@@ -455,9 +457,10 @@ class MicroPythonKernel(Kernel):
                 for pbline in priorbuffer.splitlines():
                     if deviceconnector.wifimessageignore.match(pbline):
                         continue   # filter out boring wifi status messages
-                    self.sres('[leftinbuffer] ')
-                    self.sres(str([pbline]))
-                    self.sres('\n')
+                    if pbline:
+                        self.sres('[leftinbuffer] ')
+                        self.sres(str([pbline]))
+                        self.sres('\n')
 
         try:
             if not interrupted:

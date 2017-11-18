@@ -3,15 +3,16 @@
 Jupyter kernel to interact with a MicroPython ESP8266 or ESP32 over its serial REPL.  
 
 Also with capabilities to work through the WEBREPL (available on ESP8266 only), 
-do Ctrl-C, transfer files and esptools flashing.  
+do Ctrl-C, transfer files and esptools flashing (useful for deployment).
 See https://github.com/goatchurchprime/jupyter_micropython_developer_notebooks 
 for examples.
 
 ## Installation
 
-First install Jupyter: http://jupyter.org/install.html (the Python3 version)
+First install Jupyter: http://jupyter.org/install.html (the Python3 version).
+**They strongly recommended you use the [Anaconda Distribution](https://www.anaconda.com/download/)**
 
-Then clone this repository to a directory using TortoiseGIT or with the shell command:
+Then clone this repository to a directory using TortoiseGIT or with the shell command (ie on a command line):
 
     git clone https://github.com/goatchurchprime/jupyter_micropython_kernel.git
 

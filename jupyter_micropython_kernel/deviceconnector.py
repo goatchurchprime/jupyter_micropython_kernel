@@ -71,12 +71,13 @@ def yieldserialchunk(s):
 
 
 class DeviceConnector:
-    def __init__(self, sres):
+    def __init__(self, sres, sresSYS):
         self.workingserial = None
         self.workingsocket = None
         self.workingwebsocket = None
         self.workingserialchunk = None
-        self.sres = sres
+        self.sres = sres   # two output functions borrowed across
+        self.sresSYS = sresSYS
 
     def workingserialreadall(self):  # usually used to clear the incoming buffer, results are printed out rather than used
         if self.workingserial:
@@ -103,9 +104,11 @@ class DeviceConnector:
             self.sres("Selected socket {}  {}\n".format(len(res), len(res[-1])))
         return b"".join(res)
 
-    def disconnect(self, raw, verbose=True):
-        if not raw:
-            self.exitpastemode(verbose)
+    def disconnect(self, verbose=True):
+
+        #if not raw:
+        #    self.exitpastemode(verbose)   # this doesn't seem to do any good (paste mode is left on disconnect anyway)
+        
         self.workingserialchunk = None
         if self.workingserial is not None:
             if verbose:
@@ -128,12 +131,12 @@ class DeviceConnector:
             if possibleports:
                 portname = possibleports[portname]
                 if len(possibleports) > 1:
-                    self.sres("Found serial ports {}: \n".format(", ".join(possibleports)))
+                    self.sresSYS("Found serial ports {}: \n".format(", ".join(possibleports)))
             else:
-                self.sres("No possible ports found")
+                self.sresSYS("No possible ports found")
                 portname = ("COM4" if sys.platform == "win32" else "/dev/ttyUSB0")
             
-        self.sres("Connecting to Serial {} baud={} ".format(portname, baudrate))
+        self.sresSYS("Connecting to Serial {} baud={} ".format(portname, baudrate))
         try:
             self.workingserial = serial.Serial(portname, baudrate, timeout=serialtimeout)
         except serial.SerialException as e:
@@ -141,9 +144,9 @@ class DeviceConnector:
             self.sres("\n")
             possibleports = guessserialport()
             if possibleports:
-                self.sres("\nTry one of these ports:\n  {}".format("\n  ".join(possibleports)))
+                self.sresSYS("\nTry one of these ports:\n  {}".format("\n  ".join(possibleports)))
             else:
-                self.sres("\nAre you sure your ESP-device is plugged in?")
+                self.sresSYS("\nAre you sure your ESP-device is plugged in?")
             return
             
         for i in range(5001):
@@ -151,10 +154,10 @@ class DeviceConnector:
                 break
             time.sleep(0.01)
         if verbose:
-            self.sres(" [connected]")
+            self.sresSYS(" [connected]")
         self.sres("\n")
         if verbose:
-            self.sres(str(self.dc.workingserial))
+            self.sres(str(self.workingserial))
             self.sres("\n")
 
         if i != 0 and verbose:
@@ -163,11 +166,10 @@ class DeviceConnector:
             
         
     def socketconnect(self, ipnumber, portnumber):
-        self.disconnect(False)
+        self.disconnect(verbose=True)
 
-        self.sres("Connecting to socket ({} {})\n".format(ipnumber, portnumber))
+        self.sresSYS("Connecting to socket ({} {})\n".format(ipnumber, portnumber))
         s = socket.socket()
-        self.sres("Connecting to socket ({} {})\n".format(ipnumber, portnumber))
         try:
             self.sres("preconnect\n")
             s.connect(socket.getaddrinfo(ipnumber, portnumber)[0][-1])
@@ -180,7 +182,7 @@ class DeviceConnector:
             
 
     def websocketconnect(self, websocketurl):
-        self.disconnect(False)
+        self.disconnect(verbose=True)
         try:
             self.workingwebsocket = websocket.create_connection(websocketurl, 5)
             self.workingwebsocket.settimeout(serialtimeout)
@@ -197,7 +199,7 @@ class DeviceConnector:
 
 
     def esptool(self, espcommand, portname, binfile):
-        self.disconnect(True)
+        self.disconnect(verbose=True)
         if type(portname) is int:
             possibleports = guessserialport()
             if possibleports:
@@ -370,8 +372,9 @@ class DeviceConnector:
         if self.workingserial or self.workingwebsocket:
             sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
             
-            sswrite(b'\r\x03\x03')    # ctrl-C: kill off running programs
-            time.sleep(0.1)
+            time.sleep(0.5)   # try to give a moment to connect before issuing the Ctrl-C
+            sswrite(b'\x03')    # ctrl-C: kill off running programs
+            time.sleep(0.5)
             l = self.workingserialreadall()
             if l[-6:] == b'\r\n>>> ':
                 if verbose:
