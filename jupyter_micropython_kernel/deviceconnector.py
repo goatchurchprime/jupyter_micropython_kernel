@@ -5,8 +5,7 @@ import websocket  # the old non async one
 serialtimeout = 0.5
 serialtimeoutcount = 10
 
-# see http://ascii-table.com/ansi-escape-sequences.php for colour codes on lines
-wifimessageignore = re.compile("(\x1b\[[\d;]*m)?[WI] \(\d+\) (wifi|system_api|modsocket|phy|event|cpu_start|heap_init): ")
+wifimessageignore = re.compile("(\x1b\[[\d;]*m)?[WI] \(\d+\) (wifi|system_api|modsocket|phy|event|cpu_start|heap_init|network|wpa): ")
 
 # this should take account of the operating system
 def guessserialport():  
@@ -372,9 +371,9 @@ class DeviceConnector:
         if self.workingserial or self.workingwebsocket:
             sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
             
-            time.sleep(0.5)   # try to give a moment to connect before issuing the Ctrl-C
+            time.sleep(0.2)   # try to give a moment to connect before issuing the Ctrl-C
             sswrite(b'\x03')    # ctrl-C: kill off running programs
-            time.sleep(0.5)
+            time.sleep(0.1)
             l = self.workingserialreadall()
             if l[-6:] == b'\r\n>>> ':
                 if verbose:
