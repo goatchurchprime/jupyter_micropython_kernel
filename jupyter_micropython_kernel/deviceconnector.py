@@ -16,6 +16,8 @@ def guessserialport():
 def yieldserialchunk(s):
     res = [ ]
     n = 0
+    wsresbuffer = b""
+    wsresbufferI = 0
     while True:
         try:
             if type(s) == serial.Serial:
@@ -26,14 +28,24 @@ def yieldserialchunk(s):
                     b = s._sock.recv(1)
                 else:
                     b = b''
-            else:  # websocket
-                r,w,e = select.select([s], [], [], serialtimeout)
-                if r:
-                    b = s.recv()
-                    if type(b) == str:
-                        b = b.encode("utf8")   # handle fact that strings come back from this interface
+                    
+            else:  # websocket (break down to individual bytes)
+                if wsresbufferI >= len(wsresbuffer):
+                    r,w,e = select.select([s], [], [], serialtimeout)
+                    if r:
+                        wsresbuffer = s.recv()  # this comes as batches of strings, which beed to be broken to characters
+                        if type(wsresbuffer) == str:
+                            wsresbuffer = wsresbuffer.encode("utf8")   # handle fact that strings come back from this interface
+                    else:
+                        wsresbuffer = b''
+                    wsresbufferI = 0
+                    
+                if len(wsresbuffer) > 0:
+                    b = wsresbuffer[wsresbufferI:wsresbufferI+1]
+                    wsresbufferI += 1
                 else:
                     b = b''
+
                     
         except serial.SerialException as e:
             yield b"\r\n**[ys] "
@@ -85,7 +97,7 @@ class DeviceConnector:
         if self.workingwebsocket:
             res = [ ]
             while True:
-                r,w,e = select.select([self.workingwebsocket],[],[],0)
+                r,w,e = select.select([self.workingwebsocket],[],[],0.2)  # add a timeout to the webrepl, which can be slow
                 if not r:
                     break
                 res.append(self.workingwebsocket.recv())
@@ -103,23 +115,22 @@ class DeviceConnector:
             self.sres("Selected socket {}  {}\n".format(len(res), len(res[-1])))
         return b"".join(res)
 
-    def disconnect(self, verbose=True):
-
-        #if not raw:
-        #    self.exitpastemode(verbose)   # this doesn't seem to do any good (paste mode is left on disconnect anyway)
+    def disconnect(self, raw=False, verbose=False):
+        if not raw:
+            self.exitpastemode(verbose)   # this doesn't seem to do any good (paste mode is left on disconnect anyway)
         
         self.workingserialchunk = None
         if self.workingserial is not None:
             if verbose:
-                self.sres("\nClosing serial {}\n".format(str(self.workingserial)))
+                self.sresSYS("\nClosing serial {}\n".format(str(self.workingserial)))
             self.workingserial.close() 
             self.workingserial = None
         if self.workingsocket is not None:
-            self.sres("\nClosing socket {}\n".format(str(self.workingsocket)))
+            self.sresSYS("\nClosing socket {}\n".format(str(self.workingsocket)))
             self.workingsocket.close() 
             self.workingsocket = None
         if self.workingwebsocket is not None:
-            self.sres("\nClosing websocket {}\n".format(str(self.workingwebsocket)))
+            self.sresSYS("\nClosing websocket {}\n".format(str(self.workingwebsocket)))
             self.workingwebsocket.close() 
             self.workingwebsocket = None
 
@@ -218,7 +229,7 @@ class DeviceConnector:
         if espcommand == "esp8266":
             pargs.extend(["--baud", "460800", "write_flash", "--flash_size=detect", "-fm", "dio", "0"])
             pargs.append(binfile)
-        self.sres("Executing:\n  {}\n\n".format(" ".join(pargs)))
+        self.sresSYS("Executing:\n  {}\n\n".format(" ".join(pargs)))
         process = subprocess.Popen(pargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for line in process.stdout:
             self.sres(line.decode())
@@ -227,7 +238,7 @@ class DeviceConnector:
 
     def mpycross(self, mpycrossexe, pyfile):
         pargs = [mpycrossexe, pyfile]
-        self.sres("Executing:  {}\n".format(" ".join(pargs)))
+        self.sresSYS("Executing:  {}\n".format(" ".join(pargs)))
         process = subprocess.Popen(pargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for line in process.stdout:
             self.sres(line.decode())
@@ -414,8 +425,8 @@ class DeviceConnector:
                 return
             
             if verbose:
-                self.sres('attempt to exit paste mode\n')
-                self.sres('[\\r\\x03\\x02] ')
+                self.sresSYS('attempt to exit paste mode\n')
+                self.sresSYS('[\\r\\x03\\x02] ')
                 self.sres(str(l))
         
 
@@ -425,7 +436,7 @@ class DeviceConnector:
             return ("serial.write {} bytes to {} at baudrate {}\n".format(nbyteswritten, self.workingserial.port, self.workingserial.baudrate))
         elif self.workingwebsocket:
             nbyteswritten = self.workingwebsocket.send(bytestosend)
-            return ("serial.write {} bytes to {}\n".format(nbyteswritten, "websocket"))
+            return ("serial.write {} bytes to {}\n".format(nbyteswritten, "websocket"))  # don't worry; it always includes more bytes than you think
         else:
             nbyteswritten = self.workingsocket.write(bytestosend)
             return ("serial.write {} bytes to {}\n".format(nbyteswritten, str(self.workingsocket)))

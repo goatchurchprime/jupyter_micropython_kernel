@@ -26,7 +26,7 @@ ap_socketconnect.add_argument('ipnumber', type=str)
 ap_socketconnect.add_argument('portnumber', type=int)
 
 ap_disconnect = argparse.ArgumentParser(prog="%disconnect", add_help=False)
-ap_disconnect.add_argument('--raw', help='Just close connection', action='store_true')
+ap_disconnect.add_argument('--raw', help='Close connection without exiting paste mode', action='store_true')
 
 ap_websocketconnect = argparse.ArgumentParser(prog="%websocketconnect", add_help=False)
 ap_websocketconnect.add_argument('--raw', help='Just open connection', action='store_true')
@@ -36,7 +36,11 @@ ap_websocketconnect.add_argument('--verbose', action='store_true')
 
 ap_writebytes = argparse.ArgumentParser(prog="%writebytes", add_help=False)
 ap_writebytes.add_argument('--binary', '-b', action='store_true')
+ap_writebytes.add_argument('--verbose', '-v', action='store_true')
 ap_writebytes.add_argument('stringtosend', type=str)
+
+ap_readbytes = argparse.ArgumentParser(prog="%readbytes", add_help=False)
+ap_readbytes.add_argument('--binary', '-b', action='store_true')
 
 ap_sendtofile = argparse.ArgumentParser(prog="%sendtofile", description="send a file to the microcontroller's file system", add_help=False)
 ap_sendtofile.add_argument('--append', '-a', action='store_true')
@@ -146,14 +150,12 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == ap_websocketconnect.prog:
             apargs = parseap(ap_websocketconnect, percentstringargs[1:])
-            if apargs.password is None:
-                self.sresSYS("requires --password setting\n")
+            if apargs.password is None and not apargs.raw:
+                self.sres(ap_websocketconnect.format_help())
                 return None
             self.dc.websocketconnect(apargs.websocketurl)
             if self.dc.workingwebsocket: 
-                self.sresSYS("\n ** WebSocket connected **\n\n", 32)
-                self.sres(str(self.dc.workingwebsocket))
-                self.sres("\n")
+                self.sresSYS("** WebSocket connected **\n", 32)
                 if not apargs.raw:
                     pline = self.dc.workingwebsocket.recv()
                     self.sres(pline)
@@ -232,12 +234,13 @@ class MicroPythonKernel(Kernel):
             return cellcontents.strip() and cellcontents or None
             
         if percentcommand == "%comment":
+            self.sres(" ".join(percentstringargs[1:]), asciigraphicscode=32)
             return cellcontents.strip() and cellcontents or None
             
         if percentcommand == "%lsmagic":
             self.sres(re.sub("usage: ", "", ap_capture.format_usage()))
             self.sres("    records output to a file\n\n")
-            self.sres("%comment\n    ignore this line\n\n")
+            self.sres("%comment\n    print this into output\n\n")
             self.sres(re.sub("usage: ", "", ap_disconnect.format_usage()))
             self.sres("    disconnects from web/serial connection\n\n")
             self.sres(re.sub("usage: ", "", ap_esptool.format_usage()))
@@ -246,6 +249,8 @@ class MicroPythonKernel(Kernel):
             self.sres(re.sub("usage: ", "", ap_mpycross.format_usage()))
             self.sres("    cross-compile a .py file to a .mpy file\n\n")
             self.sres("%readbytes\n    does serial.read_all()\n\n")
+            self.sres(re.sub("usage: ", "", ap_readbytes.format_usage()))
+            self.sres("    does serial.read_all()\n\n")
             self.sres("%rebootdevice\n    reboots device\n\n")
             self.sres(re.sub("usage: ", "", ap_sendtofile.format_usage()))
             self.sres("    send cell contents or file from disk to device file or directory\n\n")
@@ -253,7 +258,7 @@ class MicroPythonKernel(Kernel):
             self.sres("    connects to a device over USB wire\n\n")
             self.sres(re.sub("usage: ", "", ap_socketconnect.format_usage()))
             self.sres("    connects to a socket of a device over wifi\n\n")
-            self.sres("%suppressendcode\n    doesn't send x04 or wait to read after sending the cell\n")
+            self.sres("%suppressendcode\n    doesn't send x04 or wait to read after sending the contents of the cell\n")
             self.sres("  (assists for debugging using %writebytes and %readbytes)\n\n")
             self.sres(re.sub("usage: ", "", ap_websocketconnect.format_usage()))
             self.sres("    connects to the webREPL websocket of an ESP8266 over wifi\n")
@@ -267,7 +272,7 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand == ap_disconnect.prog:
             apargs = parseap(ap_disconnect, percentstringargs[1:])
-            self.dc.disconnect(verbose=True)
+            self.dc.disconnect(raw=apargs.raw, verbose=True)
             return None
         
         # remaining commands require a connection
@@ -287,14 +292,26 @@ class MicroPythonKernel(Kernel):
         if percentcommand == ap_writebytes.prog:
             # (not effectively using the --binary setting)
             apargs = parseap(ap_writebytes, percentstringargs[1:])
-            bytestosend = apargs.stringtosend.encode().decode("unicode_escape").encode()
-            self.sres(self.dc.writebytes(bytestosend))
+            if apargs:
+                bytestosend = apargs.stringtosend.encode().decode("unicode_escape").encode()
+                res = self.dc.writebytes(bytestosend)
+                if apargs.verbose:
+                    self.sres(res, asciigraphicscode=34)
+            else:
+                self.sres(ap_writebytes.format_help())
             return cellcontents.strip() and cellcontents or None
-            
-        if percentcommand == "%readbytes":
+
+        if percentcommand == ap_readbytes.prog:
+            # (not effectively using the --binary setting)
+            apargs = parseap(ap_readbytes, percentstringargs[1:])
             time.sleep(0.1)   # just give it a moment if running on from a series of values (could use an --expect keyword)
             l = self.dc.workingserialreadall()
-            self.sres("{}\n".format(str([l])))
+            if apargs.binary:
+                self.sres(repr(l))
+            elif type(l) == bytes:
+                self.sres(l.decode(errors="ignore"))
+            else:
+                self.sres(l)   # strings come back from webrepl
             return cellcontents.strip() and cellcontents or None
             
         if percentcommand == "%rebootdevice":
@@ -344,7 +361,7 @@ class MicroPythonKernel(Kernel):
                     destinationfilename += os.path.split(apargs.source)[1]
                 self.dc.sendtofile(destinationfilename, apargs.mkdir, apargs.append, apargs.binary, apargs.quiet, filecontents)
             else:
-                self.sres(ap_sendtofile.format_usage())
+                self.sres(ap_sendtofile.format_help())
             return cellcontents   # allows for repeat %sendtofile in same cell
 
 
