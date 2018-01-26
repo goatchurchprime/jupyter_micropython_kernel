@@ -382,9 +382,9 @@ class MicroPythonKernel(Kernel):
             self.sres("closing stuck open srescapturedoutputfile\n")
             self.srescapturedoutputfile = None
             
-        # extract any %-commands we have here at the start (or ending?)
+        # extract any %-commands we have here at the start (or ending?) (tolerating comments before the %)
         while True:
-            mpercentline = re.match("\s*(%.*)\n?(?:[ \r]*\n)?", cellcontents)
+            mpercentline = re.match("(?:(?:\s*(?:#.*)?)*)(%.*)\n?(?:[ \r]*\n)?", cellcontents)
             if not mpercentline:
                 break
             cellcontents = self.interpretpercentline(mpercentline.group(1), cellcontents[mpercentline.end():])   # discards the %command and a single blank line (if there is one) from the cell contents
