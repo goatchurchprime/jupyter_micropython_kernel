@@ -9,7 +9,9 @@ wifimessageignore = re.compile("(\x1b\[[\d;]*m)?[WI] \(\d+\) (wifi|system_api|mo
 
 # this should take account of the operating system
 def guessserialport():  
-    return sorted([x[0]  for x in serial.tools.list_ports.grep("")])
+    lp = list(serial.tools.list_ports.grep(""))
+    lp.sort(key=lambda X: (X.hwid == "n/a", X.device))  # n/a could be good evidence that the port is non-existent
+    return [x.device  for x in lp]
 
 # merge uncoming serial stream and break at OK, \x04, >, \r\n, and long delays 
 # (must make this a member function so does not have to switch on the type of s)
@@ -137,9 +139,10 @@ class DeviceConnector:
     def serialconnect(self, portname, baudrate, verbose):
         assert not  self.workingserial
         if type(portname) is int:
+            portindex = portname
             possibleports = guessserialport()
             if possibleports:
-                portname = possibleports[portname]
+                portname = possibleports[portindex]
                 if len(possibleports) > 1:
                     self.sresSYS("Found serial ports {}: \n".format(", ".join(possibleports)))
             else:
@@ -154,7 +157,7 @@ class DeviceConnector:
             self.sres("\n")
             possibleports = guessserialport()
             if possibleports:
-                self.sresSYS("\nTry one of these ports:\n  {}".format("\n  ".join(possibleports)))
+                self.sresSYS("\nTry one of these ports as --port= \n  {}".format("\n  ".join(possibleports)))
             else:
                 self.sresSYS("\nAre you sure your ESP-device is plugged in?")
             return
@@ -331,6 +334,7 @@ class DeviceConnector:
                 return
             
         sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
+        #def sswrite(x):  self.sres(str(x)); lsswrite(x)
         
         if bmkdir:
             dseq = [ d  for d in destinationfilename.split("/")[:-1]  if d]
@@ -344,9 +348,16 @@ class DeviceConnector:
         if bbinary:
             sswrite(b"import ubinascii; O6 = ubinascii.a2b_base64\r\n")
         sswrite("O=open({}, '{}')\r\n".format(repr(destinationfilename), fmodifier).encode())
+        sswrite(b'\r\x04')  # intermediate execution
+        self.receivestream(bseekokay=True)
+        clear_output = True  # set this to False to help with debugging
         if bbinary:
+            if type(filecontents) == str:
+                filecontents = filecontents.encode()
+                
             chunksize = 30
             nchunks = int(len(filecontents)/chunksize)
+
             for i in range(nchunks+1):
                 bchunk = filecontents[i*chunksize:(i+1)*chunksize]
                 sswrite(b'O.write(O6("')
@@ -356,21 +367,23 @@ class DeviceConnector:
                     sswrite(b'\r\x04')  # intermediate executions
                     self.receivestream(bseekokay=True)
                     if not bquiet:
-                        self.sres("{}%, chunk {}".format(int((i+1)/(nchunks+1)*100), i+1), clear_output=True)
+                        self.sres("{}%, chunk {}".format(int((i+1)/(nchunks+1)*100), i+1), clear_output=clear_output)
             self.sres("Sent {} bytes in {} chunks to {}.\n".format(len(filecontents), i+1, destinationfilename), clear_output=not bquiet)
             
         else:
             i = -1
+            linechunksize = 5
+
             if bappend:
                 sswrite("O.write('\\n')\r\n".encode())   # avoid line concattenation on appends
             for i, line in enumerate(lines):
                 sswrite("O.write({})\r\n".format(repr(line)).encode())
-                if (i%10) == 9:
+                if (i%linechunksize) == linechunksize-1:
                     sswrite(b'\r\x04')  # intermediate executions
                     self.receivestream(bseekokay=True)
                     if not bquiet:
-                        self.sres("{}%, line {}\n".format(int((i+1)/(len(lines)+1)*100), i+1), clear_output=True)
-            self.sres("Sent {} lines ({} bytes) to {}.\n".format(i+1, len(filecontents), destinationfilename), clear_output=not bquiet)
+                        self.sres("{}%, line {}\n".format(int((i+1)/(len(lines)+1)*100), i+1), clear_output=clear_output)
+            self.sres("Sent {} lines ({} bytes) to {}.\n".format(i+1, len(filecontents), destinationfilename), clear_output=(clear_output and not bquiet))
 
         sswrite("O.close()\r\n".encode())
         sswrite("del O\r\n".encode())
