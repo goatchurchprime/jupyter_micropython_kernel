@@ -91,11 +91,12 @@ class DeviceConnector:
         self.workingserialchunk = None
         self.sres = sres   # two output functions borrowed across
         self.sresSYS = sresSYS
+        self._esptool_command = None
 
     def workingserialreadall(self):  # usually used to clear the incoming buffer, results are printed out rather than used
         if self.workingserial:
             return self.workingserial.read_all()
-            
+
         if self.workingwebsocket:
             res = [ ]
             while True:
@@ -103,7 +104,7 @@ class DeviceConnector:
                 if not r:
                     break
                 res.append(self.workingwebsocket.recv())
-            return "".join(res) # this is returning a text array, not bytes 
+            return "".join(res) # this is returning a text array, not bytes
                                 # though a binary frame can be stipulated according to websocket.ABNF.OPCODE_MAP
                                 # fix this when we see it
 
@@ -120,20 +121,20 @@ class DeviceConnector:
     def disconnect(self, raw=False, verbose=False):
         if not raw:
             self.exitpastemode(verbose)   # this doesn't seem to do any good (paste mode is left on disconnect anyway)
-        
+
         self.workingserialchunk = None
         if self.workingserial is not None:
             if verbose:
                 self.sresSYS("\nClosing serial {}\n".format(str(self.workingserial)))
-            self.workingserial.close() 
+            self.workingserial.close()
             self.workingserial = None
         if self.workingsocket is not None:
             self.sresSYS("\nClosing socket {}\n".format(str(self.workingsocket)))
-            self.workingsocket.close() 
+            self.workingsocket.close()
             self.workingsocket = None
         if self.workingwebsocket is not None:
             self.sresSYS("\nClosing websocket {}\n".format(str(self.workingwebsocket)))
-            self.workingwebsocket.close() 
+            self.workingwebsocket.close()
             self.workingwebsocket = None
 
     def serialconnect(self, portname, baudrate, verbose):
@@ -148,7 +149,7 @@ class DeviceConnector:
             else:
                 self.sresSYS("No possible ports found")
                 portname = ("COM4" if sys.platform == "win32" else "/dev/ttyUSB0")
-            
+
         self.sresSYS("Connecting to Serial {} baud={} ".format(portname, baudrate))
         try:
             self.workingserial = serial.Serial(portname, baudrate, timeout=serialtimeout)
@@ -161,7 +162,7 @@ class DeviceConnector:
             else:
                 self.sresSYS("\nAre you sure your ESP-device is plugged in?")
             return
-            
+
         for i in range(5001):
             if self.workingserial.isOpen():
                 break
@@ -175,9 +176,9 @@ class DeviceConnector:
 
         if i != 0 and verbose:
             self.sres("Waited {} seconds for isOpen()\n".format(i*0.01))
-            
-            
-        
+
+
+
     def socketconnect(self, ipnumber, portnumber):
         self.disconnect(verbose=True)
 
@@ -192,7 +193,7 @@ class DeviceConnector:
             self.sres("Socket OSError {}".format(str(e)))
         except ConnectionRefusedError as e:
             self.sres("Socket ConnectionRefusedError {}".format(str(e)))
-            
+
 
     def websocketconnect(self, websocketurl):
         self.disconnect(verbose=True)
@@ -223,7 +224,19 @@ class DeviceConnector:
                 self.sres("No possible ports found")
                 portname = ("COM4" if sys.platform == "win32" else "/dev/ttyUSB0")
 
-        pargs = ["esptool.py", "--port", portname]
+        if self._esptool_command is None:
+            for command in ("esptool.py", "esptool"):
+                try:
+                    subprocess.check_call([command, "-h"])
+                    self._esptool_command = command
+                    break
+                except (subprocess.CalledProcessError, OSError):
+                    pass
+            if self._esptool_command is None:
+                self.sres("esptool not found on path\n")
+                return
+
+        pargs = [self._esptool_command, "--port", portname]
         if espcommand == "erase":
             pargs.append("erase_flash")
         if espcommand == "esp32":
@@ -254,16 +267,16 @@ class DeviceConnector:
         for j in range(2):  # for restarting the chunking when interrupted
             if self.workingserialchunk is None:
                 self.workingserialchunk = yieldserialchunk(self.workingserial or self.workingsocket or self.workingwebsocket)
- 
+
             indexprevgreaterthansign = -1
             index04line = -1
             for i, rline in enumerate(self.workingserialchunk):
                 assert rline is not None
-                
+
                 # warning message when we are waiting on an OK
                 if bseekokay and bwarnokaypriors and (rline != b'OK') and (rline != b'>') and rline.strip():
                     self.sres("\n[missing-OK]")
- 
+
                 # the main interpreting loop
                 if rline == b'OK' and bseekokay:
                     if i != 0 and bwarnokaypriors:
@@ -290,18 +303,18 @@ class DeviceConnector:
                 elif rline == b'Type "help()" for more information.\r\n':
                     brebootdetected = True
                     self.sres(rline.decode(), n04count=n04count)
-                    
+
                 elif rline == b'>':
                     indexprevgreaterthansign = i
                     self.sres('>', n04count=n04count)
-                    
+
                 # looks for ">>> "
-                elif rline == b' ' and brebootdetected and indexprevgreaterthansign == i-1: 
+                elif rline == b' ' and brebootdetected and indexprevgreaterthansign == i-1:
                     self.sres("[reboot detected %d]" % n04count)
                     self.enterpastemode()  # this is unintentionally recursive, but after a reboot has been seen we need to get into paste mode
                     self.sres(' ', n04count=n04count)
                     break
-                    
+
                 # normal processing of the string of bytes that have come in
                 else:
                     try:
@@ -310,47 +323,47 @@ class DeviceConnector:
                         ur = str(rline)
                     if not wifimessageignore.match(ur):
                         self.sres(ur, n04count=n04count)
-        
+
             # else on the for-loop, means the generator has ended at a stop iteration
             # this happens with Keyboard interrupt, and generator needs to be rebuilt
-            else:  # of the for-command 
+            else:  # of the for-command
                 self.workingserialchunk = None
                 continue
-                    
+
             break   # out of the for loop
         return True
-        
+
 
     def sendtofile(self, destinationfilename, bmkdir, bappend, bbinary, bquiet, filecontents):
         if not (self.workingserial or self.workingwebsocket):
             self.sres("File transfers not implemented for sockets\n", 31)
             return
-        
+
         if not bbinary:
             lines = filecontents.splitlines(True)
             maxlinelength = max(map(len, lines), default=0)
             if maxlinelength > 250:
                 self.sres("Line length {} exceeds maximum for line ascii files, try --binary\n".format(maxlinelength), 31)
                 return
-            
+
         sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
         #def sswrite(x):  self.sres(str(x)); lsswrite(x)
-        
+
         if bmkdir:
             dseq = [ d  for d in destinationfilename.split("/")[:-1]  if d]
             if dseq:
                 sswrite(b'import os\r\n')
                 for i in range(len(dseq)):
                     sswrite('try:  os.mkdir({})\r\n'.format(repr("/".join(dseq[:i+1]))).encode())
-                    sswrite(b'except OSError:  pass\r\n')            
-        
+                    sswrite(b'except OSError:  pass\r\n')
+
         fmodifier = ("a" if bappend else "w")+("b" if bbinary else "")
         if bbinary:
             sswrite(b"import ubinascii; O6 = ubinascii.a2b_base64\r\n")
         sswrite("O=open({}, '{}')\r\n".format(repr(destinationfilename), fmodifier).encode())
         sswrite(b'\r\x04')  # intermediate execution
         self.receivestream(bseekokay=True)
-        clear_output = True  # set this to False to help with debugging
+        clear_output = False  # set this to False to help with debugging
         if bbinary:
             if type(filecontents) == str:
                 filecontents = filecontents.encode()
