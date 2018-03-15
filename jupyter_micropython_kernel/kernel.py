@@ -375,10 +375,17 @@ class MicroPythonKernel(Kernel):
                             self.sres("Cannot excecute folder\n", 31)
                         for root, dirs, files in os.walk(apargs.source):
                             for fn in files:
-                                relpath = os.path.relpath(os.path.join(root, fn), apargs.source)
-                                destpath = os.path.join(destfn, relpath).replace('\\', '/')
-                                filecontents = open(os.path.join(root, fn), mode).read()
-                                sendtofile(destpath, filecontents)
+                                skip = False
+                                fp = os.path.join(root, fn)
+                                relpath = os.path.relpath(fp, apargs.source)
+                                if relpath.endswith('.py'):
+                                    # Check for compiled copy, skip py if exists
+                                    if os.path.exists(fp[:-3] + '.mpy'):
+                                        skip = True
+                                if not skip:
+                                    destpath = os.path.join(destfn, relpath).replace('\\', '/')
+                                    filecontents = open(os.path.join(root, fn), mode).read()
+                                    sendtofile(destpath, filecontents)
             else:
                 self.sres(ap_sendtofile.format_help())
             return cellcontents   # allows for repeat %sendtofile in same cell
