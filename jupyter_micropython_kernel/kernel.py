@@ -346,20 +346,39 @@ class MicroPythonKernel(Kernel):
         if percentcommand == ap_sendtofile.prog:
             apargs = parseap(ap_sendtofile, percentstringargs[1:])
             if apargs and not (apargs.source == "<<cellcontents>>" and not apargs.destinationfilename) and (apargs.source != None):
+
+                destfn = apargs.destinationfilename
+                def sendtofile(filename, contents):
+                    self.dc.sendtofile(filename, apargs.mkdir, apargs.append, apargs.binary, apargs.quiet, contents)
+
                 if apargs.source == "<<cellcontents>>":
                     filecontents = cellcontents
                     if not apargs.execute:
                         cellcontents = None
+                    sendtofile(destfn, filecontents)
+
                 else:
-                    filecontents = open(apargs.source, ("rb" if apargs.binary else "r")).read()
-                    if apargs.execute:
-                        self.sres("Cannot excecute sourced file\n", 31)
-                destinationfilename = apargs.destinationfilename
-                if not destinationfilename:
-                    destinationfilename = os.path.split(apargs.source)[1]
-                elif destinationfilename[-1] == "/":
-                    destinationfilename += os.path.split(apargs.source)[1]
-                self.dc.sendtofile(destinationfilename, apargs.mkdir, apargs.append, apargs.binary, apargs.quiet, filecontents)
+                    mode = "rb" if apargs.binary else "r"
+                    if not destfn:
+                        destfn = os.path.basename(apargs.source)
+                    elif destfn[-1] == "/":
+                        destfn += os.path.basename(apargs.source)
+
+                    if os.path.isfile(apargs.source):
+                        filecontents = open(apargs.source, mode).read()
+                        if apargs.execute:
+                            self.sres("Cannot excecute sourced file\n", 31)
+                        sendtofile(destfn, filecontents)
+
+                    elif os.path.isdir(apargs.source):
+                        if apargs.execute:
+                            self.sres("Cannot excecute folder\n", 31)
+                        for root, dirs, files in os.walk(apargs.source):
+                            for fn in files:
+                                relpath = os.path.relpath(os.path.join(root, fn), apargs.source)
+                                destpath = os.path.join(destfn, relpath).replace('\\', '/')
+                                filecontents = open(os.path.join(root, fn), mode).read()
+                                sendtofile(destpath, filecontents)
             else:
                 self.sres(ap_sendtofile.format_help())
             return cellcontents   # allows for repeat %sendtofile in same cell
