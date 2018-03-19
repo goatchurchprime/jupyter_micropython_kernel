@@ -127,7 +127,13 @@ class MicroPythonKernel(Kernel):
         
         
     def interpretpercentline(self, percentline, cellcontents):
-        percentstringargs = shlex.split(percentline)
+        try:
+            percentstringargs = shlex.split(percentline)
+        except ValueError as e:
+            self.sres("\n\n***Bad percentcommand [%s]\n" % str(e), 31)
+            self.sres(percentline)
+            return None
+
         percentcommand = percentstringargs[0]
 
         if percentcommand == ap_serialconnect.prog:
@@ -528,7 +534,7 @@ class MicroPythonKernel(Kernel):
                 try:
                     self.dc.receivestream(bseekokay=False, b5secondtimeout=True)
                 except KeyboardInterrupt:
-                    self.sres("\n\nKeyboard interrupt while waiting response on Ctrl-C\n\n" % str(e.strerror))
+                    self.sres("\n\nKeyboard interrupt while waiting response on Ctrl-C\n\n")
                 except OSError as e:
                     self.sres("\n\n***OSError while issuing a Ctrl-C [%s]\n\n" % str(e.strerror))
             return {'status': 'abort', 'execution_count': self.execution_count}
