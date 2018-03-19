@@ -363,7 +363,7 @@ class DeviceConnector:
         sswrite("O=open({}, '{}')\r\n".format(repr(destinationfilename), fmodifier).encode())
         sswrite(b'\r\x04')  # intermediate execution
         self.receivestream(bseekokay=True)
-        clear_output = False  # set this to False to help with debugging
+        clear_output = True  # set this to False to help with debugging
         if bbinary:
             if type(filecontents) == str:
                 filecontents = filecontents.encode()
