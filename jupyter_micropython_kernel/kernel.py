@@ -435,9 +435,9 @@ class MicroPythonKernel(Kernel):
             self.sres("closing stuck open srescapturedoutputfile\n")
             self.srescapturedoutputfile = None
             
-        # extract any %-commands we have here at the start (or ending?) (tolerating comments before the %)
+        # extract any %-commands we have here at the start (or ending?), tolerating pure comment lines and white space before the first % (if there's no %-command in there, then no lines at the front get dropped due to being comments)
         while True:
-            mpercentline = re.match("(?:(?:\s*(?:#.*)?)*)(%.*)\n?(?:[ \r]*\n)?", cellcontents)
+            mpercentline = re.match("(?:(?:\s*|(?:\s*#.*\n))*)(%.*)\n?(?:[ \r]*\n)?", cellcontents)
             if not mpercentline:
                 break
             cellcontents = self.interpretpercentline(mpercentline.group(1), cellcontents[mpercentline.end():])   # discards the %command and a single blank line (if there is one) from the cell contents
