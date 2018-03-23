@@ -145,12 +145,12 @@ class DeviceConnector:
             if possibleports:
                 portname = possibleports[portindex]
                 if len(possibleports) > 1:
-                    self.sresSYS("Found serial ports {}: \n".format(", ".join(possibleports)))
+                    self.sres("Found serial ports: {} \n".format(", ".join(possibleports)))
             else:
                 self.sresSYS("No possible ports found")
                 portname = ("COM4" if sys.platform == "win32" else "/dev/ttyUSB0")
 
-        self.sresSYS("Connecting to Serial {} baud={} ".format(portname, baudrate))
+        self.sresSYS("Connecting to --port={} --baud={} ".format(portname, baudrate))
         try:
             self.workingserial = serial.Serial(portname, baudrate, timeout=serialtimeout)
         except serial.SerialException as e:

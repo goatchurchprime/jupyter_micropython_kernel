@@ -121,9 +121,12 @@ class MicroPythonKernel(Kernel):
         Kernel.__init__(self, **kwargs)
         self.silent = False
         self.dc = deviceconnector.DeviceConnector(self.sres, self.sresSYS)
-        self.srescapturedoutputfile = None   # used by %capture command
-        self.srescapturedlinecount = 0      # -1 echo lines to screen as well as file, -2 total silence, >=0 update a linecound
         self.mpycrossexe = None
+
+        self.srescapturemode = 0            # 0 none, 1 print lines, 2 print on-going line count (--quiet), 3 print only final line count (--QUIET)
+        self.srescapturedoutputfile = None  # used by %capture command
+        self.srescapturedlinecount = 0
+        self.srescapturedlasttime = 0       # to control the frequency of capturing reported
         
         
     def interpretpercentline(self, percentline, cellcontents):
@@ -290,7 +293,8 @@ class MicroPythonKernel(Kernel):
             if apargs:
                 self.sres("Writing output to file {}\n\n".format(apargs.outputfilename), asciigraphicscode=32)
                 self.srescapturedoutputfile = open(apargs.outputfilename, "w")
-                self.srescapturedlinecount = (-2 if apargs.QUIET else (0 if apargs.quiet else -1))
+                self.srescapturemode = (3 if apargs.QUIET else (2 if apargs.quiet else 1))
+                self.srescapturedlinecount = 0
             else:
                 self.sres(ap_capture.format_help())
             return cellcontents
@@ -457,16 +461,23 @@ class MicroPythonKernel(Kernel):
     def sres(self, output, asciigraphicscode=None, n04count=0, clear_output=False):
         if self.silent:
             return
-        if self.srescapturedoutputfile:
+            
+        if self.srescapturedoutputfile and (n04count == 0) and not asciigraphicscode:
             self.srescapturedoutputfile.write(output)
-            if self.srescapturedlinecount == -2:   # --QUIET
+            self.srescapturedlinecount += len(output.split("\n"))-1
+            if self.srescapturemode == 3:            # 0 none, 1 print lines, 2 print on-going line count (--quiet), 3 print only final line count (--QUIET)
                 return
-            if self.srescapturedlinecount >= 0 and (n04count == 0):  # (allow stderrors to drop through)
+                
+            # changes the printing out to a lines captured statement every 1second.  
+            if self.srescapturemode == 2:  # (allow stderrors to drop through to normal printing
+                srescapturedtime = time.time()
+                if srescapturedtime < self.srescapturedlasttime + 1:   # update no more frequently than once a second
+                    return
+                self.srescapturedlasttime = srescapturedtime
                 clear_output = True
-                self.srescapturedlinecount += len(output.split("\n"))-1
                 output = "{} lines captured".format(self.srescapturedlinecount)
 
-        if clear_output:  # used when updateing lines printed
+        if clear_output:  # used when updating lines printed
             self.send_response(self.iopub_socket, 'clear_output', {"wait":True})
         if asciigraphicscode:
             output = "\x1b[{}m{}\x1b[0m".format(asciigraphicscode, output)
@@ -523,11 +534,19 @@ class MicroPythonKernel(Kernel):
         #    self.startasyncmodule()
 
         if self.srescapturedoutputfile:
+            if self.srescapturemode == 2:
+                self.send_response(self.iopub_socket, 'clear_output', {"wait":True})
+            if self.srescapturemode == 2 or self.srescapturemode == 3:
+                output = "{} lines captured.".format(self.srescapturedlinecount)  # finish off by updating with the correct number captured
+                stream_content = {'name': "stdout", 'text': output }
+                self.send_response(self.iopub_socket, 'stream', stream_content)
+                
             self.srescapturedoutputfile.close()
             self.srescapturedoutputfile = None
-
+            self.srescapturemode = 0
+            
         if interrupted:
-            self.sres("\n\n*** Sending Ctrl-C\n\n")
+            self.sresSYS("\n\n*** Sending Ctrl-C\n\n")
             if self.dc.serialexists():
                 self.dc.writebytes(b'\r\x03')
                 interrupted = True
