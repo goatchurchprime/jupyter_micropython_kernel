@@ -377,13 +377,17 @@ class MicroPythonKernel(Kernel):
                     if os.path.isfile(apargs.source):
                         filecontents = open(apargs.source, mode).read()
                         if apargs.execute:
-                            self.sres("Cannot excecute sourced file\n", 31)
+                            self.sres("Cannot execute sourced file\n", 31)
                         sendtofile(destfn, filecontents)
 
                     elif os.path.isdir(apargs.source):
                         if apargs.execute:
-                            self.sres("Cannot excecute folder\n", 31)
+                            self.sres("Cannot execute folder\n", 31)
                         for root, dirs, files in os.walk(apargs.source):
+
+                            if apargs.mkdir:
+                                self.dc.rmtree(destfn)
+
                             for fn in files:
                                 skip = False
                                 fp = os.path.join(root, fn)
