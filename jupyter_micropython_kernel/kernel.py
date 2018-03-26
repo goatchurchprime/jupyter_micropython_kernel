@@ -3,6 +3,8 @@ from ipykernel.kernelbase import Kernel
 import logging, sys, time, os, re
 import serial, socket, serial.tools.list_ports, select
 import websocket  # only for WebSocketConnectionClosedException
+import mpy_cross
+from glob import glob
 from . import deviceconnector
 
 logger = logging.getLogger(__name__)
@@ -231,13 +233,11 @@ class MicroPythonKernel(Kernel):
             if apargs and apargs.set_exe:
                 self.mpycrossexe = apargs.set_exe
             elif apargs.pyfile:
-                if self.mpycrossexe:
-                    self.dc.mpycross(self.mpycrossexe, apargs.pyfile)
-                else:
-                    self.sres("Cross compiler executable not yet set\n", 31)
-                    self.sres("try: %mpy-cross --set-exe /home/julian/extrepositories/micropython/mpy-cross/mpy-cross\n")
-                if self.mpycrossexe:
-                    self.mpycrossexe = "/home/julian/extrepositories/micropython/mpy-cross/mpy-cross"
+                if not self.mpycrossexe:
+                    self.mpycrossexe = mpy_cross.mpy_cross
+
+                for pyfile in glob(apargs.pyfile):
+                    self.dc.mpycross(self.mpycrossexe, pyfile)
             else:
                 self.sres(ap_mpycross.format_help())
             return cellcontents.strip() and cellcontents or None
