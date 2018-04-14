@@ -52,6 +52,14 @@ ap_sendtofile.add_argument('--quiet', '-q', action='store_true')
 ap_sendtofile.add_argument('--QUIET', '-Q', action='store_true')
 ap_sendtofile.add_argument('destinationfilename', type=str, nargs="?")
 
+ap_fetchfile = argparse.ArgumentParser(prog="%fetchfile", description="fetch a file from the microcontroller's file system", add_help=False)
+ap_fetchfile.add_argument('--binary', '-b', action='store_true')
+ap_fetchfile.add_argument('--print', '-p', action="store_true")
+ap_fetchfile.add_argument('--quiet', '-q', action='store_true')
+ap_fetchfile.add_argument('--QUIET', '-Q', action='store_true')
+ap_fetchfile.add_argument('sourcefilename', type=str)
+ap_fetchfile.add_argument('destinationfilename', type=str, nargs="?")
+
 ap_mpycross = argparse.ArgumentParser(prog="%mpy-cross", add_help=False)
 ap_mpycross.add_argument('--set-exe', type=str)
 ap_mpycross.add_argument('pyfile', type=str, nargs="?")
@@ -254,6 +262,8 @@ class MicroPythonKernel(Kernel):
             self.sres("    disconnects from web/serial connection\n\n")
             self.sres(re.sub("usage: ", "", ap_esptool.format_usage()))
             self.sres("    commands for flashing your esp-device\n\n")
+            self.sres(re.sub("usage: ", "", ap_fetchfile.format_usage()))
+            self.sres("    fetch and save a file from the device\n\n")
             self.sres("%lsmagic\n    list magic commands\n\n")
             self.sres(re.sub("usage: ", "", ap_mpycross.format_usage()))
             self.sres("    cross-compile a .py file to a .mpy file\n\n")
@@ -262,7 +272,7 @@ class MicroPythonKernel(Kernel):
             self.sres("    does serial.read_all()\n\n")
             self.sres("%rebootdevice\n    reboots device\n\n")
             self.sres(re.sub("usage: ", "", ap_sendtofile.format_usage()))
-            self.sres("    send cell contents or file from disk to device file or directory\n\n")
+            self.sres("    send cell contents or file/direcectory to the device\n\n")
             self.sres(re.sub("usage: ", "", ap_serialconnect.format_usage()))
             self.sres("    connects to a device over USB wire\n\n")
             self.sres(re.sub("usage: ", "", ap_socketconnect.format_usage()))
@@ -351,6 +361,24 @@ class MicroPythonKernel(Kernel):
 
         if percentcommand in ("%savetofile", "%savefile", "%sendfile"):
             self.sres("Did you mean to write %sendtofile?\n", 31)
+            return None
+
+        if percentcommand in ("%readfile", "%fetchfromfile"):
+            self.sres("Did you mean to write %fetchfile?\n", 31)
+            return None
+
+        if percentcommand == ap_fetchfile.prog:
+            apargs = parseap(ap_fetchfile, percentstringargs[1:])
+            if apargs:
+                fetchedcontents = self.dc.fetchfile(apargs.sourcefilename, apargs.binary, apargs.quiet)
+                if apargs.print:
+                    self.sres(fetchedcontents.decode() if type(fetchedcontents)==bytes else fetchedcontents, clear_output=True)
+                if (apargs.destinationfilename or not apargs.print) and fetchedcontents:
+                    fout = open(apargs.destinationfilename or apargs.sourcefilename, "wb" if apargs.binary else "w")
+                    fout.write(fetchedcontents)
+                    fout.close()
+            else:
+                self.sres(ap_fetchfile.format_help())
             return None
 
         if percentcommand == ap_sendtofile.prog:
@@ -502,10 +530,13 @@ class MicroPythonKernel(Kernel):
                 priorbuffer = []
                 self.sres("\n\n***Connection broken [%s]\n" % str(e.strerror), 31)
                 self.sres("You may need to reconnect")
+                self.dc.disconnect(raw=True, verbose=True)
+                
             except websocket.WebSocketConnectionClosedException as e:
                 priorbuffer = []
                 self.sres("\n\n***Websocket connection broken [%s]\n" % str(e.strerror), 31)
                 self.sres("You may need to reconnect")
+                self.dc.disconnect(raw=True, verbose=True)
                 
             if priorbuffer:
                 if type(priorbuffer) == bytes:

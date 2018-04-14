@@ -261,9 +261,10 @@ class DeviceConnector:
         for line in process.stderr:
             self.sres(line.decode(), n04count=1)
 
-    def receivestream(self, bseekokay, bwarnokaypriors=True, b5secondtimeout=False):
+    def receivestream(self, bseekokay, bwarnokaypriors=True, b5secondtimeout=False, bfetchfilecapture_nchunks=0):
         n04count = 0
         brebootdetected = False
+        res = [ ]
         for j in range(2):  # for restarting the chunking when interrupted
             if self.workingserialchunk is None:
                 self.workingserialchunk = yieldserialchunk(self.workingserial or self.workingsocket or self.workingwebsocket)
@@ -322,7 +323,12 @@ class DeviceConnector:
                     except UnicodeDecodeError:
                         ur = str(rline)
                     if not wifimessageignore.match(ur):
-                        self.sres(ur, n04count=n04count)
+                        if bfetchfilecapture_nchunks:
+                            res.append(ur)
+                            if (i%10) == 0:
+                                self.sres("%.1f%% fetched\n" % (i/bfetchfilecapture_nchunks*100), clear_output=True)
+                        else:
+                            self.sres(ur, n04count=n04count)
 
             # else on the for-loop, means the generator has ended at a stop iteration
             # this happens with Keyboard interrupt, and generator needs to be rebuilt
@@ -331,7 +337,7 @@ class DeviceConnector:
                 continue
 
             break   # out of the for loop
-        return True
+        return res if bfetchfilecapture_nchunks else True
 
 
     def sendtofile(self, destinationfilename, bmkdir, bappend, bbinary, bquiet, filecontents):
@@ -402,6 +408,44 @@ class DeviceConnector:
         sswrite("del O\r\n".encode())
         sswrite(b'\r\x04')
         self.receivestream(bseekokay=True)
+
+    def fetchfile(self, sourcefilename, bbinary, bquiet):
+        if not (self.workingserial or self.workingwebsocket):
+            self.sres("File transfers not implemented for sockets\n", 31)
+            return None
+        sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
+        
+        if bbinary:
+            chunksize = 30
+            sswrite(b"import sys, os; O7=sys.stdout.write\r\n")
+            sswrite(b"import ubinascii; O8 = ubinascii.b2a_base64\r\n")
+            sswrite("O=open({}, 'rb')\r\n".format(repr(sourcefilename)).encode())
+            sswrite(b"O9=bytearray(%d)\r\n" % chunksize)
+            sswrite("O4=os.stat({})[6]\r\n".format(repr(sourcefilename)).encode())
+            sswrite(b"print(O4)\r\n")
+            sswrite(b'\r\x04')   # intermediate execution to get chunk size
+            chunkres = self.receivestream(bseekokay=True, bfetchfilecapture_nchunks=-1)
+            try:
+                nbytes = int("".join(chunkres))
+            except ValueError:
+                self.sres(str(chunkres))
+                return None
+                
+            sswrite(b"O7(O8(O.read(O4%%%d)))\r\n" % chunksize)  # get sub-block
+            sswrite(b"while O.readinto(O9):  O7(O8(O9))\r\n")
+            sswrite(b"O.close(); del O, O7, O8, O9, O4\r\n")
+            sswrite(b'\r\x04')
+            chunks = self.receivestream(bseekokay=True, bfetchfilecapture_nchunks=nbytes//chunksize+1)
+            rres = [ ]
+            for ch in chunks:
+                rres.append(base64.decodebytes(ch.encode()))
+            res = b"".join(rres)
+            if not bquiet:
+                self.sres("Fetched {}={} bytes from {}.\n".format(len(res), nbytes, sourcefilename), clear_output=True)
+            return res
+        self.sres("non-binary mode not implemented")
+        return None
+
 
     def enterpastemode(self, verbose=True):         # I don't think we ever make a connection and it's still in paste mode (this is revoked on connection break, but I am trying to use exitpastemode to make it better)
         # now sort out connection situation
