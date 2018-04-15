@@ -1,4 +1,4 @@
-import logging, sys, time, os, re, base64, subprocess
+import logging, sys, time, os, re, binascii, subprocess
 import serial, socket, serial.tools.list_ports, select
 import websocket  # the old non async one
 
@@ -324,9 +324,12 @@ class DeviceConnector:
                         ur = str(rline)
                     if not wifimessageignore.match(ur):
                         if bfetchfilecapture_nchunks:
-                            res.append(ur)
+                            if res and res[-1][-2:] != "\r\n":
+                                res[-1] = res[-1] + ur   # need to rejoin strings that have been split on the b"OK" string by the lexical parser
+                            else:
+                                res.append(ur)
                             if (i%10) == 0:
-                                self.sres("%.1f%% fetched\n" % (i/bfetchfilecapture_nchunks*100), clear_output=True)
+                                self.sres("%d%% fetched\n" % int(len(res)/bfetchfilecapture_nchunks*100 + 0.5), clear_output=True)
                         else:
                             self.sres(ur, n04count=n04count)
 
@@ -380,7 +383,7 @@ class DeviceConnector:
             for i in range(nchunks+1):
                 bchunk = filecontents[i*chunksize:(i+1)*chunksize]
                 sswrite(b'O.write(O6("')
-                sswrite(base64.encodebytes(bchunk)[:-1])
+                sswrite(binascii.b2a_base64(bchunk)[:-1])
                 sswrite(b'"))\r\n')
                 if (i%10) == 9:
                     sswrite(b'\r\x04')  # intermediate executions
@@ -438,7 +441,11 @@ class DeviceConnector:
             chunks = self.receivestream(bseekokay=True, bfetchfilecapture_nchunks=nbytes//chunksize+1)
             rres = [ ]
             for ch in chunks:
-                rres.append(base64.decodebytes(ch.encode()))
+                try:
+                    rres.append(binascii.a2b_base64(ch))
+                except binascii.Error as e:
+                    self.sres(str(e))
+                    self.sres(str([ch]))
             res = b"".join(rres)
             if not bquiet:
                 self.sres("Fetched {}={} bytes from {}.\n".format(len(res), nbytes, sourcefilename), clear_output=True)
