@@ -224,10 +224,10 @@ class DeviceConnector:
                 self.sres("No possible ports found")
                 portname = ("COM4" if sys.platform == "win32" else "/dev/ttyUSB0")
 
-        if self._esptool_command is None:
-            for command in ("esptool.py", "esptool"):
+        if self._esptool_command is None:  # this section for finding what the name of the command function is; may print junk into the jupyter logs
+            for command in ("esptool.py", "esptool"):  
                 try:
-                    subprocess.check_call([command, "-h"])
+                    subprocess.check_call([command, "version"])
                     self._esptool_command = command
                     break
                 except (subprocess.CalledProcessError, OSError):
@@ -248,7 +248,10 @@ class DeviceConnector:
         self.sresSYS("Executing:\n  {}\n\n".format(" ".join(pargs)))
         process = subprocess.Popen(pargs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for line in process.stdout:
-            self.sres(line.decode())
+            x = line.decode()
+            self.sres(x)
+            if x[:12] == "Connecting..":
+                self.sresSYS("[Press the PRG button now if required]\n")
         for line in process.stderr:
             self.sres(line.decode(), n04count=1)
 
