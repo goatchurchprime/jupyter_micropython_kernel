@@ -267,7 +267,6 @@ class MicroPythonKernel(Kernel):
             self.sres("%lsmagic\n    list magic commands\n\n")
             self.sres(re.sub("usage: ", "", ap_mpycross.format_usage()))
             self.sres("    cross-compile a .py file to a .mpy file\n\n")
-            self.sres("%readbytes\n    does serial.read_all()\n\n")
             self.sres(re.sub("usage: ", "", ap_readbytes.format_usage()))
             self.sres("    does serial.read_all()\n\n")
             self.sres("%rebootdevice\n    reboots device\n\n")
@@ -374,7 +373,9 @@ class MicroPythonKernel(Kernel):
                 if apargs.print:
                     self.sres(fetchedcontents.decode() if type(fetchedcontents)==bytes else fetchedcontents, clear_output=True)
                 if (apargs.destinationfilename or not apargs.print) and fetchedcontents:
-                    fout = open(apargs.destinationfilename or apargs.sourcefilename, "wb" if apargs.binary else "w")
+                    dstfile = apargs.destinationfilename or os.path.basename(apargs.sourcefilename)
+                    self.sres("Saving file to {}".format(repr(dstfile)))
+                    fout = open(dstfile, "wb" if apargs.binary else "w")
                     fout.write(fetchedcontents)
                     fout.close()
             else:

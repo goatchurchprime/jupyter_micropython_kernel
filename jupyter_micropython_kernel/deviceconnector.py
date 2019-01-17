@@ -423,9 +423,9 @@ class DeviceConnector:
         
         if bbinary:
             chunksize = 30
-            sswrite(b"import sys, os; O7=sys.stdout.write\r\n")
-            sswrite(b"import ubinascii; O8 = ubinascii.b2a_base64\r\n")
-            sswrite("O=open({}, 'rb')\r\n".format(repr(sourcefilename)).encode())
+            sswrite(b"import sys,os;O7=sys.stdout.write\r\n")
+            sswrite(b"import ubinascii;O8=ubinascii.b2a_base64\r\n")
+            sswrite("O=open({},'rb')\r\n".format(repr(sourcefilename)).encode())
             sswrite(b"O9=bytearray(%d)\r\n" % chunksize)
             sswrite("O4=os.stat({})[6]\r\n".format(repr(sourcefilename)).encode())
             sswrite(b"print(O4)\r\n")
@@ -438,8 +438,8 @@ class DeviceConnector:
                 return None
                 
             sswrite(b"O7(O8(O.read(O4%%%d)))\r\n" % chunksize)  # get sub-block
-            sswrite(b"while O.readinto(O9):  O7(O8(O9))\r\n")
-            sswrite(b"O.close(); del O, O7, O8, O9, O4\r\n")
+            sswrite(b"while O.readinto(O9): O7(O8(O9))\r\n")
+            sswrite(b"O.close(); del O,O7,O8,O9,O4\r\n")
             sswrite(b'\r\x04')
             chunks = self.receivestream(bseekokay=True, bfetchfilecapture_nchunks=nbytes//chunksize+1)
             rres = [ ]

@@ -132,13 +132,14 @@ Other known projects that have implemented a Jupyter Micropython kernel are:
 * https://github.com/TDAbboud/mpkernel
 * https://github.com/takluyver/ubit_kernel
 * https://github.com/jneines/nodemcu_kernel
+* https://github.com/zsquareplusc/mpy-repl-tool
 
 In my defence, this is not an effect of not-invented-here syndrome; I did not discover most of these 
 other projects until I had mostly written this one.  
 
 I do think that for robustness it is important to expose the full processes 
-of making connections and But for my purposes, this is more robust and contains debugging (of the 
-serial connections) capability.
+of making connections.  For my purposes this is more robust and contains debugging (of the 
+serial connections) capability through its %lsmagic functions.
 
 Other known projects to have made Jupyter-like or secondary interfaces to Micropython:
 * https://github.com/nickzoic/mpy-webpad
