@@ -458,7 +458,7 @@ class DeviceConnector:
         return None
 
     def listdir(self, dirname, recurse):
-        self.sres("Listing directory '%s'.\n" % dirname)
+        self.sres("Listing directory '%s'.\n" % (dirname or '/'))
         sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
         
         def ssldir(d):

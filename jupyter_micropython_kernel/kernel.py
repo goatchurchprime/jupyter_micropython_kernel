@@ -1,4 +1,5 @@
 from ipykernel.kernelbase import Kernel
+import IPython
 
 import logging, sys, time, os, re
 import serial, socket, serial.tools.list_ports, select
@@ -59,6 +60,7 @@ ap_ls.add_argument('dirname', type=str, nargs="?")
 ap_fetchfile = argparse.ArgumentParser(prog="%fetchfile", description="fetch a file from the microcontroller's file system", add_help=False)
 ap_fetchfile.add_argument('--binary', '-b', action='store_true')
 ap_fetchfile.add_argument('--print', '-p', action="store_true")
+ap_fetchfile.add_argument('--load', '-l', action="store_true")
 ap_fetchfile.add_argument('--quiet', '-q', action='store_true')
 ap_fetchfile.add_argument('--QUIET', '-Q', action='store_true')
 ap_fetchfile.add_argument('sourcefilename', type=str)
@@ -378,12 +380,21 @@ class MicroPythonKernel(Kernel):
                 fetchedcontents = self.dc.fetchfile(apargs.sourcefilename, apargs.binary, apargs.quiet)
                 if apargs.print:
                     self.sres(fetchedcontents.decode() if type(fetchedcontents)==bytes else fetchedcontents, clear_output=True)
-                if (apargs.destinationfilename or not apargs.print) and fetchedcontents:
+                    
+                if (apargs.destinationfilename or (not apargs.print and not apargs.load)) and fetchedcontents:
                     dstfile = apargs.destinationfilename or os.path.basename(apargs.sourcefilename)
                     self.sres("Saving file to {}".format(repr(dstfile)))
                     fout = open(dstfile, "wb" if apargs.binary else "w")
                     fout.write(fetchedcontents)
                     fout.close()
+                    
+                if apargs.load:
+                    fcontents = fetchedcontents.decode() if type(fetchedcontents)==bytes else fetchedcontents
+                    if not apargs.quiet:
+                        fcontents = "#%s\n\n%s" % (" ".join(percentstringargs), fcontents)
+                    set_next_input_payload = { "source": "set_next_input", "text":fcontents, "replace": True }
+                    return set_next_input_payload
+                
             else:
                 self.sres(ap_fetchfile.format_help())
             return None
@@ -485,19 +496,22 @@ class MicroPythonKernel(Kernel):
             if not mpercentline:
                 break
             cellcontents = self.interpretpercentline(mpercentline.group(1), cellcontents[mpercentline.end():])   # discards the %command and a single blank line (if there is one) from the cell contents
+            if isinstance(cellcontents, dict) and cellcontents.get("source") == "set_next_input":
+                return cellcontents # set_next_input_payload:
             if cellcontents is None:
-                return
+                return None
                 
         if not self.dc.serialexists():
             self.sres("No serial connected\n", 31)
             self.sres("  %serialconnect to connect\n")
             self.sres("  %esptool to flash the device\n")
             self.sres("  %lsmagic to list commands")
-            return
+            return None
             
         # run the cell contents as normal
         if cellcontents:
             self.runnormalcell(cellcontents, bsuppressendcode)
+        return Nones
             
     def sresSYS(self, output, clear_output=False):   # system call
         self.sres(output, asciigraphicscode=34, clear_output=clear_output)
@@ -569,9 +583,11 @@ class MicroPythonKernel(Kernel):
                         self.sres(str([pbline]))
                         self.sres('\n')
 
+        
+        set_next_input_payload = None
         try:
             if not interrupted:
-                self.sendcommand(code)
+                set_next_input_payload = self.sendcommand(code)
         except KeyboardInterrupt:
             interrupted = True
         except OSError as e:
@@ -607,5 +623,6 @@ class MicroPythonKernel(Kernel):
             
         # everything already gone out with send_response(), but could detect errors (text between the two \x04s
 
-        return {'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {}}
+        payload = [set_next_input_payload]  if set_next_input_payload else []   # {"source": "set_next_input", "text": "some cell content", "replace": False}
+        return {'status': 'ok', 'execution_count': self.execution_count, 'payload': payload, 'user_expressions': {}}
                     
