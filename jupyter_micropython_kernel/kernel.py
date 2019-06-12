@@ -52,6 +52,10 @@ ap_sendtofile.add_argument('--quiet', '-q', action='store_true')
 ap_sendtofile.add_argument('--QUIET', '-Q', action='store_true')
 ap_sendtofile.add_argument('destinationfilename', type=str, nargs="?")
 
+ap_ls = argparse.ArgumentParser(prog="%ls", description="list directory of the microcontroller's file system", add_help=False)
+ap_ls.add_argument('--recurse', '-r', action='store_true')
+ap_ls.add_argument('dirname', type=str, nargs="?")
+
 ap_fetchfile = argparse.ArgumentParser(prog="%fetchfile", description="fetch a file from the microcontroller's file system", add_help=False)
 ap_fetchfile.add_argument('--binary', '-b', action='store_true')
 ap_fetchfile.add_argument('--print', '-p', action="store_true")
@@ -264,6 +268,8 @@ class MicroPythonKernel(Kernel):
             self.sres("    commands for flashing your esp-device\n\n")
             self.sres(re.sub("usage: ", "", ap_fetchfile.format_usage()))
             self.sres("    fetch and save a file from the device\n\n")
+            self.sres(re.sub("usage: ", "", ap_ls.format_usage()))
+            self.sres("    list files on the device\n\n")
             self.sres("%lsmagic\n    list magic commands\n\n")
             self.sres(re.sub("usage: ", "", ap_mpycross.format_usage()))
             self.sres("    cross-compile a .py file to a .mpy file\n\n")
@@ -381,6 +387,15 @@ class MicroPythonKernel(Kernel):
             else:
                 self.sres(ap_fetchfile.format_help())
             return None
+            
+        if percentcommand == ap_ls.prog:
+            apargs = parseap(ap_ls, percentstringargs[1:])
+            if apargs:
+                self.dc.listdir(apargs.dirname or "", apargs.recurse)
+            else:
+                self.sres(ap_ls.format_help())
+            return None
+
 
         if percentcommand == ap_sendtofile.prog:
             apargs = parseap(ap_sendtofile, percentstringargs[1:])

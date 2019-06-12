@@ -1,4 +1,4 @@
-import logging, sys, time, os, re, binascii, subprocess
+import logging, sys, time, os, re, binascii, subprocess, ast
 import serial, socket, serial.tools.list_ports, select
 import websocket  # the old non async one
 
@@ -331,7 +331,7 @@ class DeviceConnector:
                                 res[-1] = res[-1] + ur   # need to rejoin strings that have been split on the b"OK" string by the lexical parser
                             else:
                                 res.append(ur)
-                            if (i%10) == 0:
+                            if (i%10) == 0 and bfetchfilecapture_nchunks > 0:
                                 self.sres("%d%% fetched\n" % int(len(res)/bfetchfilecapture_nchunks*100 + 0.5), clear_output=True)
                         else:
                             self.sres(ur, n04count=n04count)
@@ -421,7 +421,9 @@ class DeviceConnector:
             return None
         sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
         
-        if bbinary:
+        if not bbinary:
+            self.sres("non-binary mode not implemented, switching to binary")
+        if True:
             chunksize = 30
             sswrite(b"import sys,os;O7=sys.stdout.write\r\n")
             sswrite(b"import ubinascii;O8=ubinascii.b2a_base64\r\n")
@@ -453,10 +455,39 @@ class DeviceConnector:
             if not bquiet:
                 self.sres("Fetched {}={} bytes from {}.\n".format(len(res), nbytes, sourcefilename), clear_output=True)
             return res
-        self.sres("non-binary mode not implemented")
         return None
 
-
+    def listdir(self, dirname, recurse):
+        self.sres("Listing directory '%s'.\n" % dirname)
+        sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
+        
+        def ssldir(d):
+            sswrite(b"import os,sys\r\n")
+            sswrite(("for O in os.ilistdir(%s):\r\n" % repr(d)).encode())
+            sswrite(b"  sys.stdout.write(repr(O))\r\n")
+            sswrite(b"  sys.stdout.write('\\n')\r\n")
+            sswrite(b"del O\r\n")
+            sswrite(b'\r\x04')
+            k = self.receivestream(bseekokay=True, bfetchfilecapture_nchunks=-1)
+            ll = list(map(ast.literal_eval, k))
+            ll.sort()
+            for l in ll:
+                if l[1] == 0x4000:
+                    self.sres("             %s/\n"%(d+'/'+l[0]).lstrip("/"))
+                else:
+                    self.sres("%9d    %s\n" % (l[3], (d+'/'+l[0]).lstrip("/")))
+            return [ d+"/"+l[0]  for l in ll  if l[1] == 0x4000 ]
+            
+        ld = ssldir(dirname)
+        if recurse:
+            while ld:
+                d = ld.pop(0)
+                self.sres("\n%s:\n"%d.lstrip("/"))
+                ld.extend(ssldir(d))
+                
+        return None
+        
+        
     def enterpastemode(self, verbose=True):         # I don't think we ever make a connection and it's still in paste mode (this is revoked on connection break, but I am trying to use exitpastemode to make it better)
         # now sort out connection situation
         if self.workingserial or self.workingwebsocket:
