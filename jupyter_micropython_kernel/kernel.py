@@ -511,7 +511,7 @@ class MicroPythonKernel(Kernel):
         # run the cell contents as normal
         if cellcontents:
             self.runnormalcell(cellcontents, bsuppressendcode)
-        return Nones
+        return None
             
     def sresSYS(self, output, clear_output=False):   # system call
         self.sres(output, asciigraphicscode=34, clear_output=clear_output)
