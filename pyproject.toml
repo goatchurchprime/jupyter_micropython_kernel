@@ -1,0 +1,27 @@
+[build-system]
+requires = ["flit_core >=2,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.flit.metadata]
+module = "jupyter_micropython_kernel"
+description-file = "README.md"
+author = "Julian Todd, Tony DiCola"
+author-email = "julian@goatchurch.org.uk"
+home-page = "https://github.com/goatchurchprime/jupyter_micropython_kernel"
+requires-python=">=3.0"
+requires=[
+    "pyserial>=3.4",
+    "websocket-client>=0.44"
+]
+classifiers=[
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
