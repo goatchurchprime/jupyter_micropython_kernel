@@ -12,7 +12,15 @@ for examples.
 First install Jupyter: http://jupyter.org/install.html (the Python3 version).
 **They strongly recommended you use the [Anaconda Distribution](https://www.anaconda.com/download/)**
 
-Then clone this repository to a directory using TortoiseGIT or with the shell command (ie on a command line):
+### Via PyPi
+
+```
+pip install jupyter_micropython_kernel
+python -m jupyter_micropython_kernel.install
+```
+### Manual Installation
+
+Clone this repository to a directory using TortoiseGIT or with the shell command (ie on a command line):
 
     git clone https://github.com/goatchurchprime/jupyter_micropython_kernel.git
 
@@ -25,7 +33,6 @@ directory, and makes it possible to "git update" the library later as it gets im
 (Things can go wrong here, and you might need "pip3" or "sudo pip" if you have 
 numerous different versions of python installed
 
-
 Install the kernel into jupyter itself using the shell command:
 
     python -m jupyter_micropython_kernel.install
@@ -33,10 +40,11 @@ Install the kernel into jupyter itself using the shell command:
 (This creates the small file ".local/share/jupyter/kernels/micropython/kernel.json" 
 that jupyter uses to reference it's kernels
 
+### Post-Install
+
 To find out where your kernelspecs are stored, you can type:
 
     jupyter kernelspec list
-
 
 ## Running
 
