@@ -385,7 +385,7 @@ class MicroPythonKernel(Kernel):
                     dstfile = apargs.destinationfilename or os.path.basename(apargs.sourcefilename)
                     self.sres("Saving file to {}".format(repr(dstfile)))
                     fout = open(dstfile, "wb" if apargs.binary else "w")
-                    fout.write(fetchedcontents)
+                    fout.write(str(fetchedcontents))
                     fout.close()
                     
                 if apargs.load:
