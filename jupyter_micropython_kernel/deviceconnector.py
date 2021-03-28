@@ -345,6 +345,29 @@ class DeviceConnector:
             break   # out of the for loop
         return res if bfetchfilecapture_nchunks else True
 
+    def rmtree(self, top):
+        sswrite = self.workingserial.write  if self.workingserial  else self.workingwebsocket.send
+        sswrite(
+            b'def rmtree(top):\r\n'
+            b'  import os\r\n'
+            b'  try:  os.remove(top)\r\n'
+            b'  except OSError:  pass\r\n'
+            b'  try:\r\n'
+            b'    for e in os.listdir(top):\r\n'
+            b'      p = "/".join((top,e))\r\n'
+            b'      try:  os.remove(p)\r\n'
+            b'      except:  rmtree(p)\r\n'
+            b'    os.rmdir(top)\r\n'
+            b'  except OSError:  pass\r\n'
+            b'  done = False\r\n'
+            b'  try:  os.stat(top)\r\n'
+            b'  except OSError:  done = True\r\n'
+            b'  return done\r\n\r\n'
+        )
+        sswrite('if not rmtree({}):  print("Failed to delete original {}")\r\n'.format(repr(top), top).encode())
+        sswrite(b'del rmtree\r\n')
+        sswrite(b'\r\x04')  # intermediate execution
+        self.receivestream(bseekokay=True)  # Wait for it to execute
 
     def sendtofile(self, destinationfilename, bmkdir, bappend, bbinary, bquiet, filecontents):
         if not (self.workingserial or self.workingwebsocket):
