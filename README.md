@@ -18,26 +18,29 @@ First install Jupyter: http://jupyter.org/install.html (the Python3 version).
 pip install jupyter_micropython_kernel
 python -m jupyter_micropython_kernel.install
 ```
-### Manual Installation
+
+### Manual Installation (more maintainable)
 
 Clone this repository to a directory using TortoiseGIT or with the shell command (ie on a command line):
 
     git clone https://github.com/goatchurchprime/jupyter_micropython_kernel.git
 
-Install this library (in editable mode) into Python3 using the shell command:
+On **Windows**, Install this library (in editable mode) into Python3 using the shell command:
+
+    pip install jupyter_micropython_kernel
+
+On **Linux**, you can install this library in editable mode using symlinks, which makes it easy to `git pull` a debugged version later:
 
     pip install -e jupyter_micropython_kernel
 
-This creates a small file pointing to this directory in the python/../site-packages 
-directory, and makes it possible to "git update" the library later as it gets improved.
-(Things can go wrong here, and you might need "pip3" or "sudo pip" if you have 
+Things can go wrong here, and you might need "pip3" or "sudo pip" if you have 
 numerous different versions of python installed
 
 Install the kernel into jupyter itself using the shell command:
 
     python -m jupyter_micropython_kernel.install
 
-(This creates the small file ".local/share/jupyter/kernels/micropython/kernel.json" 
+This creates the small file ".local/share/jupyter/kernels/micropython/kernel.json" 
 that jupyter uses to reference it's kernels
 
 ### Post-Install
@@ -45,6 +48,7 @@ that jupyter uses to reference it's kernels
 To find out where your kernelspecs are stored, you can type:
 
     jupyter kernelspec list
+
 
 ## Running
 
@@ -55,21 +59,40 @@ Now run Jupyter notebooks:
 In the notebook click the New notebook button in the upper right, you should see your
 MicroPython kernel display name listed.  
 
-The first cell will need to be something like:
+If you have an ESP32 or ESP8266 already running MicroPython, plug it in, put the following command into the first cell and run it:
 
     %serialconnect
     
-or something that matches the serial port and baudrate that 
-you connect to your MicroPython/ESP8266 with.
+If you are on **Linux** and don't have the correct permissions to access the Serial ports you will get a "permissions error".  Fix it by adding yourself to the dialout and tty groups:
 
-You should now be able to execute MicroPython commands 
-by running the cells.
+    sudo usermod -a -G tty your_user_name
+    sudo usermod -a -G dialout your_user_name
 
-'''On Windows it can sometimes be difficult to find the Serial (COM-port) 
-and the right driver.  This is not unique to the jupyter_micropython_kernel
-and is a function of the USB chip that is on the breakout board containing 
-your ESP32/ESP8266.  Find the USB connection in the Device list to see what driver 
-it needs or look for instructions from the supplier of the board.'''
+If you are on **Windows** you need to have the right driver for the USB chip on the ESP32/ESP8266 breakout board.  
+Look for the USB connection in the Device List to identify the supplier and look for instructions relating to that supplier.  
+
+The notebook scans the serial ports (the COM-values in Windows) and tells you the possibilities and tries one of them.  If it picks the wrong port you may need to be more specific and use the command:
+
+    %serialconnect --port=COM5
+
+## Uploading the MicroPython firmware onto a new board 
+
+This is done using the `esptool.py`.  The Jupyter micropython kernel has features to help you execute this command.  
+
+    %esptool erase
+
+and
+
+    %esptool esp8266 /home/julian/executables/micropythonbins/esp8266-20200902-v1.13.bin
+
+or
+
+    %esptool esp32 /home/julian/executables/micropythonbins/esp32-20191006-v1.11-406-g4a6974bea.bin
+
+Download these Micropython firmware files from https://micropython.org/download
+
+
+## Further notes
 
 There is a micropythondemo.ipynb file in the directory you could 
 look at with some of the features shown.
