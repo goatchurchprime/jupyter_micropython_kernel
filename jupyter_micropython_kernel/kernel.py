@@ -157,19 +157,22 @@ class MicroPythonKernel(Kernel):
             apargs = parseap(ap_serialconnect, percentstringargs[1:])
             
             self.dc.disconnect(apargs.verbose)
-            self.dc.serialconnect(apargs.port, apargs.baud, apargs.verbose)
-            if self.dc.workingserial:
-                if not apargs.raw:
-                    if self.dc.enterpastemode(verbose=apargs.verbose):
-                        self.sresSYS("Ready.\n")
-                    else:
-                        self.sres("Disconnecting [paste mode not working]\n", 31)
-                        self.dc.disconnect(verbose=apargs.verbose)
-                        self.sresSYS("  (You may need to reset the device)")
-                        cellcontents = ""
-            else:
-                cellcontents = ""
-            return cellcontents.strip() and cellcontents or None
+            try:
+                apargs.port = int(apargs.port)
+            finally:
+                self.dc.serialconnect(apargs.port, apargs.baud, apargs.verbose)
+                if self.dc.workingserial:
+                    if not apargs.raw:
+                        if self.dc.enterpastemode(verbose=apargs.verbose):
+                            self.sresSYS("Ready.\n")
+                        else:
+                            self.sres("Disconnecting [paste mode not working]\n", 31)
+                            self.dc.disconnect(verbose=apargs.verbose)
+                            self.sresSYS("  (You may need to reset the device)")
+                            cellcontents = ""
+                else:
+                    cellcontents = ""
+                return cellcontents.strip() and cellcontents or None
 
         if percentcommand == ap_websocketconnect.prog:
             apargs = parseap(ap_websocketconnect, percentstringargs[1:])
