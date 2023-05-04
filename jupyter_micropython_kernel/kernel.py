@@ -1,7 +1,7 @@
 from ipykernel.kernelbase import Kernel
 import IPython
 
-import logging, sys, time, os, re
+import logging, sys, time, os, re, ast, traceback
 import serial, socket, serial.tools.list_ports, select
 import websocket  # only for WebSocketConnectionClosedException
 from . import deviceconnector
@@ -84,6 +84,46 @@ ap_writefilepc = argparse.ArgumentParser(prog="%%writefile", description="write 
 ap_writefilepc.add_argument('--append', '-a', action='store_true')
 ap_writefilepc.add_argument('--execute', '-x', action='store_true')
 ap_writefilepc.add_argument('destinationfilename', type=str)
+
+
+def add_print(expr):
+    """
+        surrounds an expression A with a print call that does not print if A is None:
+        print((lambda expr: expr if expr is not None else '')(A), end='')
+    """
+    return ast.Expr(
+        value=ast.Call(
+            func=ast.Name(
+                id='print',
+                ctx=ast.Load()
+            ),
+            args=[ast.Call(
+                func=ast.Lambda(
+                    args=ast.arguments(
+                        posonlyargs=[],
+                        args=[ast.arg(arg='expr')],
+                        kwonlyargs=[],
+                        kw_defaults=[],
+                        defaults=[]
+                    ),
+                    body=ast.IfExp(
+                        test=ast.Compare(
+                            left=ast.Name(
+                                id='expr',
+                                ctx=ast.Load()
+                            ),
+                            ops=[ast.IsNot()],
+                            comparators=[ast.Constant(value=None)]
+                        ),
+                        body=ast.Name(id='expr', ctx=ast.Load()),
+                        orelse=ast.Constant(value='')
+                    )
+                ),
+                args=[expr],
+                keywords=[])],
+            keywords=[ast.keyword(arg='end', value=ast.Constant(value=''))]
+        )
+    )
  
 
 def parseap(ap, percentstringargs1):
@@ -141,6 +181,8 @@ class MicroPythonKernel(Kernel):
         self.srescapturedoutputfile = None  # used by %capture command
         self.srescapturedlinecount = 0
         self.srescapturedlasttime = 0       # to control the frequency of capturing reported
+
+        self.autoprint = False              # surround last ast.Node with print() if ast.Expression
         
         
     def interpretpercentline(self, percentline, cellcontents):
@@ -456,10 +498,42 @@ class MicroPythonKernel(Kernel):
             return cellcontents   # allows for repeat %sendtofile in same cell
 
 
+        if percentcommand == "%setautoprint":
+            self.autoprint = True
+            return cellcontents.strip() and cellcontents or None
+
+
+        if percentcommand == "%setnoautoprint":
+            self.autoprint = False
+            return cellcontents.strip() and cellcontents or None
+
+
         self.sres("Unrecognized percentline {}\n".format([percentline]), 31)
         return cellcontents
         
     def runnormalcell(self, cellcontents, bsuppressendcode):
+        if self.autoprint:
+            try:
+                parsed = ast.parse(cellcontents)
+                
+                if isinstance(parsed.body[-1], ast.Expr):
+                    parsed.body[-1] = add_print(parsed.body[-1])
+
+                cellcontents = ast.unparse(parsed)
+                
+            except SyntaxError as e:
+                self.sres(
+                    'A syntax error was found in cell. Code not sent to device.\n' +
+                    'If you feel that micropython should accept the cell content ' +
+                    'turn off autoprint.\n\nError was:\n',
+                     n04count=1
+                )
+                self.sres(
+                    traceback.format_exc(),
+                    n04count=1
+                )
+                return
+
         cmdlines = cellcontents.splitlines(True)
         r = self.dc.workingserialreadall()
         if r:
